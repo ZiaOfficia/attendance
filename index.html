@@ -72,6 +72,58 @@
     .msg a { color: inherit; font-weight: 600; }
     .hidden { display: none; }
     h2 { font-size: 17px; margin: 0 0 14px; }
+
+    /* Charts */
+    :root {
+      --g-ok: #0ca30c; --g-warn: #fab219; --g-miss: #6250d6; --g-bad: #d03b3b; --g-leave: #2a78d6;
+      --bar: #2a78d6; --grid: #e1e0d9; --axis: #c3c2b7;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --g-miss: #9085e9; --g-leave: #3987e5; --bar: #3987e5; --grid: #2a3446; --axis: #3a4558; }
+    }
+    .g-ok { background: var(--g-ok); } .g-warn { background: var(--g-warn); } .g-miss { background: var(--g-miss); }
+    .g-bad { background: var(--g-bad); } .g-leave { background: var(--g-leave); } .g-off { background: var(--off-soft); }
+    .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; margin-bottom: 16px; }
+    .charts .card { margin: 0; }
+    .sub { margin: -10px 0 14px; color: var(--muted); font-size: 13px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 14px; font-size: 13px; color: var(--muted); }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend i { width: 10px; height: 10px; border-radius: 3px; }
+    .vchart { display: grid; grid-template-columns: 28px 1fr; column-gap: 6px; }
+    .yaxis, .plot { position: relative; height: 200px; }
+    .yaxis span { position: absolute; right: 0; transform: translateY(50%); font-size: 11px; color: var(--muted);
+      font-variant-numeric: tabular-nums; }
+    .plot .gl { position: absolute; left: 0; right: 0; border-top: 1px solid var(--grid); }
+    .plot .gl.base { border-top-color: var(--axis); }
+    .cols, .xlabels { display: flex; }
+    .cols { position: absolute; inset: 0; align-items: stretch; }
+    .col { flex: 1; display: flex; justify-content: center; align-items: flex-end; border-radius: 6px; outline: none; }
+    .col:hover, .col:focus-visible { background: var(--accent-soft); }
+    .stack { width: min(24px, 70%); display: flex; flex-direction: column-reverse; gap: 2px; border-radius: 4px 4px 0 0; overflow: hidden; }
+    .stack > div { flex: 1 1 0; min-height: 2px; }
+    .xlabels { grid-column: 2; padding-top: 6px; }
+    .xlabels span { flex: 1; text-align: center; font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.25; }
+    .xlabels small { display: block; color: var(--muted); font-size: 10px; }
+    .hrow { display: grid; grid-template-columns: 92px 1fr auto; align-items: center; gap: 10px; padding: 3px 4px; border-radius: 6px; outline: none; }
+    .hrow:hover, .hrow:focus-visible { background: var(--accent-soft); }
+    .hname { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .htrack { position: relative; height: 14px; border-left: 1px solid var(--axis); }
+    .htrack i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 4px 4px 0; }
+    .htrack .hbar { background: var(--bar); }
+    .hval { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+    .empty, .note { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+    .cal-wrap { overflow-x: auto; }
+    .cal { display: grid; gap: 2px; min-width: max-content; }
+    .cal .nm { font-size: 13px; padding-right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; align-self: center; }
+    .cal .hd { font-size: 11px; text-align: center; font-variant-numeric: tabular-nums; line-height: 1.25; padding-bottom: 4px; }
+    .cal .hd small { display: block; color: var(--muted); font-size: 10px; }
+    .cal .c { height: 24px; min-width: 26px; border-radius: 4px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #0b0b0b; }
+    .cal .c.g-bad, .cal .c.g-leave, .cal .c.g-miss { color: #fff; }
+    .cal .c.g-off { color: var(--muted); }
+    .cal .c:hover { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--text); }
+    .tip { position: fixed; z-index: 10; pointer-events: none; background: var(--card); color: var(--text); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45; box-shadow: 0 6px 20px rgba(0,0,0,.14); max-width: 260px; }
+    .tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
   </style>
 </head>
 <body>
@@ -98,6 +150,40 @@
       <div class="meta" id="stats"></div>
     </section>
 
+    <div class="hidden" id="charts">
+      <section class="card">
+        <h2>Daily attendance</h2>
+        <p class="sub">Employees per status each day</p>
+        <div id="dailyLegend"></div>
+        <div class="vchart" id="dailyChart"></div>
+      </section>
+
+      <div class="charts">
+        <section class="card">
+          <h2>Attendance rate</h2>
+          <p class="sub">Days present out of scheduled days</p>
+          <div id="rateChart"></div>
+        </section>
+        <section class="card">
+          <h2>Late arrivals</h2>
+          <p class="sub">Total minutes late in the period</p>
+          <div id="lateChart"></div>
+        </section>
+        <section class="card">
+          <h2>Left early</h2>
+          <p class="sub">Total minutes left before shift end</p>
+          <div id="earlyChart"></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>Attendance calendar</h2>
+        <p class="sub">P present · L late · E left early · LE both · M missed punch · A absent · LV leave · O out</p>
+        <div id="calLegend"></div>
+        <div class="cal-wrap"><div class="cal" id="calendar"></div></div>
+      </section>
+    </div>
+
     <section class="card hidden" id="preview">
       <div class="row" style="margin-bottom:12px">
         <div class="tabs grow" style="margin:0;border:0">
@@ -123,6 +209,7 @@
       <div class="msg" id="sendMsg"></div>
     </section>
   </div>
+  <div class="tip" id="tip" hidden></div>
 
   <script>
     const $ = (id) => document.getElementById(id);
@@ -165,7 +252,7 @@
         data = AttendanceParser.parse(XLSX, wb);
       } catch (err) {
         data = null;
-        ['overview', 'preview', 'send'].forEach((id) => $(id).classList.add('hidden'));
+        ['overview', 'charts', 'preview', 'send'].forEach((id) => $(id).classList.add('hidden'));
         show($('parseMsg'), 'bad', 'Could not read this file: ' + esc(err.message));
         return;
       }
@@ -174,8 +261,142 @@
       renderOverview();
       renderFilter();
       renderTable();
-      ['overview', 'preview', 'send'].forEach((id) => $(id).classList.remove('hidden'));
+      ['overview', 'charts', 'preview', 'send'].forEach((id) => $(id).classList.remove('hidden'));
+      renderCharts();
     }
+
+    // Status groups shared by the daily chart and the calendar, stacked bottom to top
+    const GROUPS = [
+      { label: 'On time', cls: 'g-ok', st: ['Present', 'Present (Holiday)'] },
+      { label: 'Late / left early', cls: 'g-warn', st: ['Late', 'Left Early', 'Late, Left Early'] },
+      { label: 'Missed punch', cls: 'g-miss', st: ['Missed Punch'] },
+      { label: 'Absent', cls: 'g-bad', st: ['Absent'] },
+      { label: 'Leave / out', cls: 'g-leave', st: ['Leave', 'Out'] },
+    ];
+    const SHORT = {
+      'Present': 'P', 'Present (Holiday)': 'P', 'Late': 'L', 'Left Early': 'E', 'Late, Left Early': 'LE',
+      'Missed Punch': 'M', 'Absent': 'A', 'Holiday': '', 'Leave': 'LV', 'Out': 'O',
+    };
+    const groupOf = (status) => GROUPS.find((g) => g.st.includes(status));
+    const legend = (groups) => '<div class="legend">' +
+      groups.map((g) => '<span><i class="' + g.cls + '"></i>' + g.label + '</span>').join('') + '</div>';
+
+    function renderCharts() {
+      const dates = [...new Set(data.daily.map((d) => d.date))];
+      renderDailyChart(dates);
+      renderCalendar(dates);
+      const rows = data.summary;
+
+      hbars($('rateChart'), rows.map((s) => {
+        const rate = s.scheduledDays ? s.presentDays / s.scheduledDays : 0;
+        return { name: s.name, value: rate, text: s.presentDays + '/' + s.scheduledDays,
+          tip: '<b>' + esc(s.name) + '</b><br>' + Math.round(rate * 100) + '% present<br>' +
+            s.presentDays + ' present · ' + s.absentDays + ' absent · ' + s.leaveDays + ' leave' };
+      }).sort((a, b) => b.value - a.value), 1);
+
+      minutesChart($('lateChart'), rows, 'lateMin', 'lateTimes', 'late');
+      minutesChart($('earlyChart'), rows, 'earlyMin', 'earlyTimes', 'left early');
+    }
+
+    function minutesChart(el, rows, minKey, timesKey, verb) {
+      const hit = rows.filter((s) => s[minKey] > 0).sort((a, b) => b[minKey] - a[minKey]);
+      const max = Math.max(1, ...hit.map((s) => s[minKey]));
+      hbars(el, hit.map((s) => ({
+        name: s.name, value: s[minKey], text: s[minKey] + ' min',
+        tip: '<b>' + esc(s.name) + '</b><br>' + verb[0].toUpperCase() + verb.slice(1) + ' ' + s[timesKey] +
+          (s[timesKey] === 1 ? ' time' : ' times') + ', ' + s[minKey] + ' min total',
+      })), max);
+      const none = rows.length - hit.length;
+      el.insertAdjacentHTML('beforeend', hit.length
+        ? (none ? '<p class="note">' + none + ' of ' + rows.length + ' employees were never ' + verb + '.</p>' : '')
+        : '<p class="empty">Nobody was ' + verb + ' in this period.</p>');
+    }
+
+    function hbars(el, items, max) {
+      el.innerHTML = items.map((it) => '<div class="hrow" tabindex="0" data-tip="' + esc(it.tip) + '">' +
+        '<span class="hname">' + esc(it.name) + '</span><span class="htrack">' +
+        '<i class="hbar" style="width:' + (it.value / max * 100) + '%"></i></span>' +
+        '<span class="hval">' + esc(it.text) + '</span></div>').join('');
+    }
+
+    function renderDailyChart(dates) {
+      const step = Math.max(1, Math.ceil(data.summary.length / 4));
+      const max = step * 4;
+      const ticks = [0, 1, 2, 3, 4].map((i) => i * step);
+      let cols = '';
+      let labels = '';
+      dates.forEach((date) => {
+        const recs = data.daily.filter((d) => d.date === date);
+        const counts = GROUPS.map((g) => recs.filter((r) => g.st.includes(r.status)).length);
+        const sum = counts.reduce((a, b) => a + b, 0);
+        const day = recs[0].day;
+        const tip = '<b>' + day + ' ' + date + '</b>' + (sum
+          ? GROUPS.map((g, i) => counts[i] ? '<br><i class="' + g.cls + '"></i>' + g.label + ': ' + counts[i] : '').join('')
+          : '<br>Holiday');
+        cols += '<div class="col" tabindex="0" data-tip="' + esc(tip) + '"><div class="stack" style="height:' + (sum / max * 100) + '%">' +
+          GROUPS.map((g, i) => counts[i] ? '<div class="' + g.cls + '" style="flex-grow:' + counts[i] + '"></div>' : '').join('') +
+          '</div></div>';
+        labels += '<span>' + Number(date.slice(8)) + '<small>' + day.slice(0, 2) + '</small></span>';
+      });
+      $('dailyLegend').innerHTML = legend(GROUPS);
+      $('dailyChart').innerHTML =
+        '<div class="yaxis">' + ticks.map((t) => '<span style="bottom:' + (t / max * 100) + '%">' + t + '</span>').join('') + '</div>' +
+        '<div class="plot">' + ticks.map((t) => '<div class="gl' + (t ? '' : ' base') + '" style="bottom:' + (t / max * 100) + '%"></div>').join('') +
+        '<div class="cols">' + cols + '</div></div>' +
+        '<div class="xlabels">' + labels + '</div>';
+    }
+
+    function renderCalendar(dates) {
+      const byKey = {};
+      data.daily.forEach((d) => (byKey[d.id + '|' + d.date] = d));
+      const cal = $('calendar');
+      cal.style.gridTemplateColumns = '110px repeat(' + dates.length + ', minmax(26px, 1fr))';
+      let html = '<span></span>' + dates.map((date) => {
+        const d = data.daily.find((x) => x.date === date);
+        return '<span class="hd">' + Number(date.slice(8)) + '<small>' + d.day.slice(0, 2) + '</small></span>';
+      }).join('');
+      data.summary.forEach((s) => {
+        html += '<span class="nm" title="' + esc(s.name) + '">' + esc(s.name) + '</span>';
+        dates.forEach((date) => {
+          const d = byKey[s.id + '|' + date];
+          if (!d) { html += '<span class="c g-off"></span>'; return; }
+          const g = groupOf(d.status);
+          const times = [d.inTime && 'In ' + d.inTime, d.outTime && 'Out ' + d.outTime].filter(Boolean).join(' · ');
+          const mins = [d.lateMin && d.lateMin + ' min late', d.earlyMin && d.earlyMin + ' min early'].filter(Boolean).join(' · ');
+          const tip = '<b>' + esc(s.name) + '</b><br>' + d.day + ' ' + date + '<br>' +
+            (g ? '<i class="' + g.cls + '"></i>' : '') + esc(d.status) +
+            (times ? '<br>' + times : '') + (mins ? '<br>' + mins : '');
+          html += '<span class="c ' + (g ? g.cls : 'g-off') + '" data-tip="' + esc(tip) + '">' + (SHORT[d.status] || '') + '</span>';
+        });
+      });
+      cal.innerHTML = html;
+      $('calLegend').innerHTML = legend(GROUPS.concat({ label: 'Holiday', cls: 'g-off' }));
+    }
+
+    // One shared tooltip for every chart mark carrying data-tip; hover and keyboard focus both show it
+    const tip = $('tip');
+    function placeTip(x, y) {
+      const w = tip.offsetWidth, h = tip.offsetHeight;
+      let left = x + 14, top = y - h - 10;
+      if (left + w > innerWidth - 8) left = x - w - 14;
+      if (top < 8) top = y + 18;
+      tip.style.left = Math.max(8, left) + 'px';
+      tip.style.top = top + 'px';
+    }
+    function showTip(t) {
+      if (!t) { tip.hidden = true; return false; }
+      tip.innerHTML = t.dataset.tip;
+      tip.hidden = false;
+      return true;
+    }
+    document.addEventListener('mouseover', (e) => { if (showTip(e.target.closest('[data-tip]'))) placeTip(e.clientX, e.clientY); });
+    document.addEventListener('mousemove', (e) => { if (!tip.hidden) placeTip(e.clientX, e.clientY); });
+    document.addEventListener('focusin', (e) => {
+      const t = e.target.closest('[data-tip]');
+      if (showTip(t)) { const r = t.getBoundingClientRect(); placeTip(r.left + r.width / 2, r.top); }
+    });
+    document.addEventListener('focusout', () => (tip.hidden = true));
+    addEventListener('scroll', () => (tip.hidden = true), { passive: true });
 
     function renderOverview() {
       $('periodTitle').textContent = 'Period: ' + data.period.from + ' to ' + data.period.to;
@@ -210,7 +431,7 @@
           ['absenceMin', 'Absent (Min)', 1], ['status', 'Status']];
         rows = data.daily;
       } else {
-        cols = [['id', 'ID'], ['name', 'Name'], ['normalHours', 'Normal Hrs'], ['realHours', 'Real Hrs'],
+        cols = [['id', 'ID'], ['name', 'Name'],
           ['lateTimes', 'Late Times', 1], ['lateMin', 'Late (Min)', 1], ['earlyTimes', 'Early Times', 1],
           ['earlyMin', 'Early (Min)', 1], ['scheduledDays', 'Scheduled', 1], ['presentDays', 'Present', 1],
           ['absentDays', 'Absent', 1], ['leaveDays', 'Leave', 1]];

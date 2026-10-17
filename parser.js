@@ -141,8 +141,6 @@
         id,
         name: str(s[1]),
         dept: str(s[2]),
-        normalHours: str(s[3]),
-        realHours: str(s[4]),
         lateTimes: num(s[5]),
         lateMin: num(s[6]),
         earlyTimes: num(s[7]),
