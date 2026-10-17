@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attendance Upload</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="parser.js"></script>
+  <style>
+    :root {
+      --bg: #f5f7fb; --card: #ffffff; --text: #1b2433; --muted: #657186; --line: #e2e7ef;
+      --accent: #2456d6; --accent-ink: #ffffff; --accent-soft: #e8eefc;
+      --ok: #1e7b45; --ok-soft: #e3f4ea; --warn: #9a6200; --warn-soft: #fdf1d8;
+      --bad: #b3261e; --bad-soft: #fbe5e3; --off: #6b7280; --off-soft: #eef0f3;
+      --info: #1d5fa8; --info-soft: #e1ecf8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f141c; --card: #171e29; --text: #e6ebf2; --muted: #95a1b4; --line: #273142;
+        --accent: #6d95ff; --accent-ink: #0b1220; --accent-soft: #1d2a47;
+        --ok: #6fd39a; --ok-soft: #173326; --warn: #f1c46b; --warn-soft: #3a2f16;
+        --bad: #f08c84; --bad-soft: #3d1c1a; --off: #a3abb8; --off-soft: #232a35;
+        --info: #8bbcf2; --info-soft: #172b42;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
+    header h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -0.01em; }
+    header p { margin: 0 0 24px; color: var(--muted); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+    .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 36px 16px; text-align: center; cursor: pointer;
+      transition: border-color .15s, background .15s; }
+    .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+    .drop strong { display: block; font-size: 17px; margin-bottom: 4px; }
+    .drop span { color: var(--muted); font-size: 14px; }
+    .drop svg { width: 40px; height: 40px; color: var(--accent); margin-bottom: 8px; }
+    input[type=file] { display: none; }
+    label.field { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    input[type=url], select { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--bg); color: var(--text); font: inherit; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .grow { flex: 1 1 260px; min-width: 0; }
+    button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 11px 18px; cursor: pointer;
+      background: var(--accent); color: var(--accent-ink); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .stat { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+    .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+    .stat small { color: var(--muted); }
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 0 0 12px; }
+    .tabs button { background: none; color: var(--muted); border-radius: 0; padding: 10px 14px; border-bottom: 2px solid transparent; }
+    .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+    .table-wrap { overflow: auto; max-height: 520px; border: 1px solid var(--line); border-radius: 10px; }
+    table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+    th { position: sticky; top: 0; background: var(--card); font-weight: 600; z-index: 1; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .s-ok { background: var(--ok-soft); color: var(--ok); }
+    .s-warn { background: var(--warn-soft); color: var(--warn); }
+    .s-bad { background: var(--bad-soft); color: var(--bad); }
+    .s-off { background: var(--off-soft); color: var(--off); }
+    .s-info { background: var(--info-soft); color: var(--info); }
+    .msg { padding: 12px 14px; border-radius: 10px; margin-top: 12px; display: none; }
+    .msg.show { display: block; }
+    .msg.ok { background: var(--ok-soft); color: var(--ok); }
+    .msg.bad { background: var(--bad-soft); color: var(--bad); }
+    .msg.info { background: var(--info-soft); color: var(--info); }
+    .msg a { color: inherit; font-weight: 600; }
+    .hidden { display: none; }
+    h2 { font-size: 17px; margin: 0 0 14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Attendance Upload</h1>
+      <p>Upload the machine's <b>StandardReport.xls</b>, check the preview, then send it to Google Sheets.</p>
+    </header>
+
+    <section class="card">
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose attendance file">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+        </svg>
+        <strong id="dropTitle">Drop the .xls file here or click to choose</strong>
+        <span id="dropSub">Supports .xls and .xlsx exports from the attendance machine</span>
+      </div>
+      <input type="file" id="file" accept=".xls,.xlsx">
+      <div class="msg" id="parseMsg"></div>
+    </section>
+
+    <section class="card hidden" id="overview">
+      <h2 id="periodTitle"></h2>
+      <div class="meta" id="stats"></div>
+    </section>
+
+    <section class="card hidden" id="preview">
+      <div class="row" style="margin-bottom:12px">
+        <div class="tabs grow" style="margin:0;border:0">
+          <button class="on" data-tab="daily">Daily Attendance</button>
+          <button data-tab="summary">Summary</button>
+        </div>
+        <div style="flex:0 1 240px">
+          <select id="empFilter" aria-label="Filter by employee"><option value="">All employees</option></select>
+        </div>
+      </div>
+      <div class="table-wrap"><table id="table"></table></div>
+    </section>
+
+    <section class="card hidden" id="send">
+      <h2>Send to Google Sheet</h2>
+      <div class="row">
+        <div class="grow">
+          <label class="field" for="url">Apps Script Web App URL</label>
+          <input type="url" id="url" value="https://script.google.com/macros/s/AKfycbzKcU7FPjryD0geFrySIYsAjJNI28h_rrsFXQXCMnjMj7xSs5sQvh57NEwrugRe_Jb4rA/exec">
+        </div>
+        <div style="align-self:flex-end"><button id="sendBtn">Send to Google Sheet</button></div>
+      </div>
+      <div class="msg" id="sendMsg"></div>
+    </section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let data = null;
+    let tab = 'daily';
+
+    const STATUS_CLASS = {
+      'Present': 's-ok', 'Present (Holiday)': 's-ok',
+      'Late': 's-warn', 'Left Early': 's-warn', 'Late, Left Early': 's-warn', 'Missed Punch': 's-warn',
+      'Absent': 's-bad', 'Holiday': 's-off', 'Leave': 's-info', 'Out': 's-info',
+    };
+
+    try { const u = localStorage.getItem('attendanceUrl'); if (u) $('url').value = u; } catch (e) {}
+
+    const drop = $('drop');
+    drop.addEventListener('click', () => $('file').click());
+    drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') $('file').click(); });
+    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault(); drop.classList.remove('over');
+      if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]);
+    });
+    $('file').addEventListener('change', (e) => { if (e.target.files[0]) load(e.target.files[0]); });
+
+    function show(el, kind, html) {
+      el.className = 'msg show ' + kind;
+      el.innerHTML = html;
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    async function load(file) {
+      $('parseMsg').className = 'msg';
+      $('sendMsg').className = 'msg';
+      try {
+        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        data = AttendanceParser.parse(XLSX, wb);
+      } catch (err) {
+        data = null;
+        ['overview', 'preview', 'send'].forEach((id) => $(id).classList.add('hidden'));
+        show($('parseMsg'), 'bad', 'Could not read this file: ' + esc(err.message));
+        return;
+      }
+      $('dropTitle').textContent = file.name;
+      $('dropSub').textContent = 'Click or drop another file to replace';
+      renderOverview();
+      renderFilter();
+      renderTable();
+      ['overview', 'preview', 'send'].forEach((id) => $(id).classList.remove('hidden'));
+    }
+
+    function renderOverview() {
+      $('periodTitle').textContent = 'Period: ' + data.period.from + ' to ' + data.period.to;
+      const c = {};
+      data.daily.forEach((d) => (c[d.status] = (c[d.status] || 0) + 1));
+      const late = (c['Late'] || 0) + (c['Late, Left Early'] || 0);
+      const early = (c['Left Early'] || 0) + (c['Late, Left Early'] || 0);
+      const items = [
+        ['Employees', data.summary.length],
+        ['Daily records', data.daily.length],
+        ['Present', (c['Present'] || 0) + (c['Present (Holiday)'] || 0) + late + (c['Left Early'] || 0)],
+        ['Late', late],
+        ['Left early', early],
+        ['Missed punch', c['Missed Punch'] || 0],
+        ['Absent', c['Absent'] || 0],
+      ];
+      $('stats').innerHTML = items.map(([k, v]) => '<div class="stat"><b>' + v + '</b><small>' + k + '</small></div>').join('');
+    }
+
+    function renderFilter() {
+      const sel = $('empFilter');
+      sel.innerHTML = '<option value="">All employees</option>' +
+        data.summary.map((s) => '<option value="' + esc(s.id) + '">' + esc(s.name) + ' (' + esc(s.id) + ')</option>').join('');
+    }
+
+    function renderTable() {
+      const id = $('empFilter').value;
+      let cols, rows;
+      if (tab === 'daily') {
+        cols = [['id', 'ID'], ['name', 'Name'], ['date', 'Date'], ['day', 'Day'], ['inTime', 'In'], ['outTime', 'Out'],
+          ['punches', 'All Punches'], ['lateMin', 'Late (Min)', 1], ['earlyMin', 'Left Early (Min)', 1],
+          ['absenceMin', 'Absent (Min)', 1], ['status', 'Status']];
+        rows = data.daily;
+      } else {
+        cols = [['id', 'ID'], ['name', 'Name'], ['normalHours', 'Normal Hrs'], ['realHours', 'Real Hrs'],
+          ['lateTimes', 'Late Times', 1], ['lateMin', 'Late (Min)', 1], ['earlyTimes', 'Early Times', 1],
+          ['earlyMin', 'Early (Min)', 1], ['scheduledDays', 'Scheduled', 1], ['presentDays', 'Present', 1],
+          ['absentDays', 'Absent', 1], ['leaveDays', 'Leave', 1]];
+        rows = data.summary;
+      }
+      if (id) rows = rows.filter((r) => r.id === id);
+      const head = '<thead><tr>' + cols.map((c) => '<th>' + c[1] + '</th>').join('') + '</tr></thead>';
+      const body = '<tbody>' + rows.map((r) => '<tr>' + cols.map(([k, , n]) => {
+        if (k === 'status') return '<td><span class="pill ' + (STATUS_CLASS[r[k]] || 's-off') + '">' + esc(r[k]) + '</span></td>';
+        return '<td' + (n ? ' class="num"' : '') + '>' + esc(r[k]) + '</td>';
+      }).join('') + '</tr>').join('') + '</tbody>';
+      $('table').innerHTML = head + body;
+    }
+
+    document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
+      tab = b.dataset.tab;
+      document.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('on', x === b));
+      renderTable();
+    }));
+    $('empFilter').addEventListener('change', renderTable);
+
+    $('sendBtn').addEventListener('click', async () => {
+      const url = $('url').value.trim();
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) {
+        show($('sendMsg'), 'bad', 'Enter a valid Apps Script Web App URL ending in <b>/exec</b>.');
+        return;
+      }
+      try { localStorage.setItem('attendanceUrl', url); } catch (e) {}
+      const btn = $('sendBtn');
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      show($('sendMsg'), 'info', 'Writing ' + data.daily.length + ' daily rows and ' + data.summary.length + ' summary rows…');
+      try {
+        // text/plain avoids a CORS preflight, which Apps Script does not support
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(data),
+        });
+        const text = await res.text();
+        let out;
+        try { out = JSON.parse(text); } catch (e) {
+          throw new Error(/doPost/.test(text)
+            ? 'The script has no doPost function. Paste Code.gs into Apps Script and deploy a new version.'
+            : 'Unexpected response from Apps Script. Check the deployment access is set to "Anyone".');
+        }
+        if (!out.ok) throw new Error(out.error);
+        show($('sendMsg'), 'ok',
+          'Done. Daily Attendance: ' + out.daily.added + ' added, ' + out.daily.updated + ' updated. ' +
+          'Summary: ' + out.summary.added + ' added, ' + out.summary.updated + ' updated.' +
+          (out.sheetUrl ? ' <a href="' + esc(out.sheetUrl) + '" target="_blank" rel="noopener">Open the sheet</a>' : ''));
+      } catch (err) {
+        show($('sendMsg'), 'bad', 'Upload failed: ' + esc(err.message));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Send to Google Sheet';
+      }
+    });
+  </script>
+</body>
+</html>
