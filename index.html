@@ -174,6 +174,11 @@
           <p class="sub">Total minutes left before shift end</p>
           <div id="earlyChart"></div>
         </section>
+        <section class="card">
+          <h2>Extra work</h2>
+          <p class="sub">Total minutes worked after 6:30 PM</p>
+          <div id="extraChart"></div>
+        </section>
       </div>
 
       <section class="card">
@@ -296,6 +301,7 @@
 
       minutesChart($('lateChart'), rows, 'lateMin', 'lateTimes', 'late');
       minutesChart($('earlyChart'), rows, 'earlyMin', 'earlyTimes', 'left early');
+      minutesChart($('extraChart'), rows, 'extraMin', 'extraDays', 'past 6:30 PM');
     }
 
     function minutesChart(el, rows, minKey, timesKey, verb) {
@@ -362,7 +368,8 @@
           if (!d) { html += '<span class="c g-off"></span>'; return; }
           const g = groupOf(d.status);
           const times = [d.inTime && 'In ' + d.inTime, d.outTime && 'Out ' + d.outTime].filter(Boolean).join(' · ');
-          const mins = [d.lateMin && d.lateMin + ' min late', d.earlyMin && d.earlyMin + ' min early'].filter(Boolean).join(' · ');
+          const mins = [d.lateMin && d.lateMin + ' min late', d.earlyMin && d.earlyMin + ' min early',
+            d.extraMin && d.extraMin + ' min extra work'].filter(Boolean).join(' · ');
           const tip = '<b>' + esc(s.name) + '</b><br>' + d.day + ' ' + date + '<br>' +
             (g ? '<i class="' + g.cls + '"></i>' : '') + esc(d.status) +
             (times ? '<br>' + times : '') + (mins ? '<br>' + mins : '');
@@ -412,6 +419,7 @@
         ['Left early', early],
         ['Missed punch', c['Missed Punch'] || 0],
         ['Absent', c['Absent'] || 0],
+        ['Extra work', data.daily.filter((d) => d.extraMin > 0).length],
       ];
       $('stats').innerHTML = items.map(([k, v]) => '<div class="stat"><b>' + v + '</b><small>' + k + '</small></div>').join('');
     }
@@ -428,13 +436,14 @@
       if (tab === 'daily') {
         cols = [['id', 'ID'], ['name', 'Name'], ['date', 'Date'], ['day', 'Day'], ['inTime', 'In'], ['outTime', 'Out'],
           ['punches', 'All Punches'], ['lateMin', 'Late (Min)', 1], ['earlyMin', 'Left Early (Min)', 1],
-          ['absenceMin', 'Absent (Min)', 1], ['status', 'Status']];
+          ['absenceMin', 'Absent (Min)', 1], ['extraMin', 'Extra Work (Min)', 1], ['status', 'Status']];
         rows = data.daily;
       } else {
         cols = [['id', 'ID'], ['name', 'Name'],
           ['lateTimes', 'Late Times', 1], ['lateMin', 'Late (Min)', 1], ['earlyTimes', 'Early Times', 1],
           ['earlyMin', 'Early (Min)', 1], ['scheduledDays', 'Scheduled', 1], ['presentDays', 'Present', 1],
-          ['absentDays', 'Absent', 1], ['leaveDays', 'Leave', 1]];
+          ['absentDays', 'Absent', 1], ['leaveDays', 'Leave', 1],
+          ['extraDays', 'Extra Work Days', 1], ['extraMin', 'Extra Work (Min)', 1]];
         rows = data.summary;
       }
       if (id) rows = rows.filter((r) => r.id === id);

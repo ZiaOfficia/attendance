@@ -4,6 +4,8 @@
   'use strict';
 
   const DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  const EXTRA_WORK_AFTER = 18 * 60 + 30; // Leaving after 6:30 PM counts as extra work
+  const LATE_ALLOWANCE = { '9': 2 }; // Employee ID -> lates taken off the period total (9 = ABDULLAH)
 
   function rows(XLSX, wb, name) {
     const ws = wb.Sheets[name];
@@ -40,6 +42,12 @@
   // "10:3918:31" -> ["10:39", "18:31"]
   function splitPunches(cell) {
     return str(cell).match(/\d{1,2}:\d{2}/g) || [];
+  }
+
+  // "18:42" -> 1122
+  function minutes(time) {
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
   }
 
   function parse(XLSX, wb) {
@@ -126,6 +134,7 @@
           lateMin: ex.late,
           earlyMin: ex.early,
           absenceMin: ex.absence,
+          extraMin: outTime ? Math.max(0, minutes(outTime) - EXTRA_WORK_AFTER) : 0,
           status,
         });
       });
@@ -137,11 +146,12 @@
       const id = str(s[0]);
       if (!id) continue;
       const days = str(s[11]).split('/');
+      const extra = daily.filter((d) => d.id === id && d.extraMin > 0);
       summary.push({
         id,
         name: str(s[1]),
         dept: str(s[2]),
-        lateTimes: num(s[5]),
+        lateTimes: Math.max(0, num(s[5]) - (LATE_ALLOWANCE[id] || 0)),
         lateMin: num(s[6]),
         earlyTimes: num(s[7]),
         earlyMin: num(s[8]),
@@ -152,6 +162,8 @@
         outDays: num(s[12]),
         absentDays: num(s[13]),
         leaveDays: num(s[14]),
+        extraDays: extra.length,
+        extraMin: extra.reduce((total, d) => total + d.extraMin, 0),
       });
     }
 

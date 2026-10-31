@@ -13,14 +13,14 @@ const SUMMARY_SHEET = 'Summary';
 
 const DAILY_HEADERS = [
   'ID', 'Name', 'Department', 'Date', 'Day', 'In', 'Out', 'All Punches',
-  'Late (Min)', 'Left Early (Min)', 'Absent (Min)', 'Status',
+  'Late (Min)', 'Left Early (Min)', 'Absent (Min)', 'Status', 'Extra Work (Min)',
 ];
 
 const SUMMARY_HEADERS = [
-  'Period From', 'Period To', 'ID', 'Name', 'Department', 'Normal Hours', 'Real Hours',
+  'Period From', 'Period To', 'ID', 'Name', 'Department',
   'Late Times', 'Late (Min)', 'Left Early Times', 'Left Early (Min)',
   'OT Workday', 'OT Holiday', 'Scheduled Days', 'Present Days', 'Out Days',
-  'Absent Days', 'Leave Days',
+  'Absent Days', 'Leave Days', 'Extra Work Days', 'Extra Work (Min)',
 ];
 
 const STATUS_COLORS = {
@@ -53,15 +53,15 @@ function doPost(e) {
 
     const dailyRows = data.daily.map((r) => [
       r.id, r.name, r.dept, r.date, r.day, r.inTime, r.outTime, r.punches,
-      r.lateMin, r.earlyMin, r.absenceMin, r.status,
+      r.lateMin, r.earlyMin, r.absenceMin, r.status, r.extraMin,
     ]);
     const daily = upsert(ss, DAILY_SHEET, DAILY_HEADERS, dailyRows, (row) => row[0] + '|' + row[3]);
     colorStatus(ss.getSheetByName(DAILY_SHEET));
 
     const summaryRows = data.summary.map((r) => [
-      data.period.from, data.period.to, r.id, r.name, r.dept, r.normalHours, r.realHours,
+      data.period.from, data.period.to, r.id, r.name, r.dept,
       r.lateTimes, r.lateMin, r.earlyTimes, r.earlyMin, r.overtimeWorkday, r.overtimeHoliday,
-      r.scheduledDays, r.presentDays, r.outDays, r.absentDays, r.leaveDays,
+      r.scheduledDays, r.presentDays, r.outDays, r.absentDays, r.leaveDays, r.extraDays, r.extraMin,
     ]);
     const summary = upsert(ss, SUMMARY_SHEET, SUMMARY_HEADERS, summaryRows, (row) => row[0] + '|' + row[1] + '|' + row[2]);
 
@@ -81,11 +81,10 @@ function upsert(ss, name, headers, rows, keyOf) {
   let sheet = ss.getSheetByName(name);
   if (!sheet) sheet = ss.insertSheet(name);
 
-  if (sheet.getLastRow() === 0) {
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers])
-      .setFontWeight('bold').setBackground('#1f3a5f').setFontColor('#ffffff');
-    sheet.setFrozenRows(1);
-  }
+  // Rewritten on every upload so existing sheets pick up new columns
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+    .setFontWeight('bold').setBackground('#1f3a5f').setFontColor('#ffffff');
+  sheet.setFrozenRows(1);
 
   const width = headers.length;
   const lastRow = sheet.getLastRow();
