@@ -15,7 +15,7 @@
 
   // ---------- Saved preferences (this browser only) ----------
   const STORE_KEY = 'attendance.v1';
-  const DEFAULT_SETTINGS = { basis: '30', half: '0.5', fine: 100, free: 2, ot: 'none', otRate: 0, paidLeaves: 2 };
+  const DEFAULT_SETTINGS = { basis: '30', half: '0.5', fine: 100, free: 2, ot: 'none', otRate: 0, paidLeaves: 2, ignoreOff: false };
   const saved = (() => { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; } })();
   const prefs = {
     salaries: saved.salaries || {},
@@ -119,6 +119,7 @@
     const s = prefs.settings;
     state.data = AttendanceParser.parse(XLSX, state.wb, {
       holidays: prefs.holidays,
+      ignoreScheduleOff: s.ignoreOff === true,
       lateFine: Math.max(0, Number(s.fine) || 0),
       freeLatesPerMonth: Math.max(0, Math.floor(Number(s.free) || 0)),
     });
@@ -671,6 +672,7 @@
     const s = prefs.settings;
     $('r-basis').value = s.basis; $('r-half').value = s.half; $('r-fine').value = s.fine; $('r-free').value = s.free;
     $('r-ot').value = s.ot; $('r-otRate').value = s.otRate; $('r-paidLeaves').value = s.paidLeaves;
+    $('r-ignoreOff').checked = s.ignoreOff === true;
     $('r-otRateWrap').classList.toggle('hidden', s.ot !== 'fixed');
   }
 
@@ -686,7 +688,7 @@
     if (b) toggleHoliday(b.dataset.remove);
   });
 
-  const RULES = { 'r-basis': 'basis', 'r-half': 'half', 'r-fine': 'fine', 'r-free': 'free', 'r-ot': 'ot', 'r-otRate': 'otRate', 'r-paidLeaves': 'paidLeaves' };
+  const RULES = { 'r-basis': 'basis', 'r-half': 'half', 'r-fine': 'fine', 'r-free': 'free', 'r-ot': 'ot', 'r-otRate': 'otRate', 'r-paidLeaves': 'paidLeaves', 'r-ignoreOff': 'ignoreOff' };
   Object.keys(RULES).forEach((id) => $(id).addEventListener('change', (e) => {
     prefs.settings[RULES[id]] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
     persist();

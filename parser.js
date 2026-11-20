@@ -15,6 +15,7 @@
     lateFine: 100, // Rs per chargeable late
     freeLatesPerMonth: 2, // First lates each month are not charged
     holidays: {}, // 'YYYY-MM-DD' -> name; days off entered by hand, on top of the machine's schedule
+    ignoreScheduleOff: false, // true = days off in the machine's schedule count as working days
   };
 
   function rows(XLSX, wb, name) {
@@ -130,8 +131,11 @@
 
         const holiday = opt.holidays[day.iso] || '';
 
+        // No shift code = off in the machine's schedule, unless those offs are ignored
+        const scheduleOff = !opt.ignoreScheduleOff && (code === '' || code === undefined);
+
         let status;
-        if (holiday || code === '' || code === undefined) status = times.length ? 'Present (Holiday)' : 'Holiday';
+        if (holiday || scheduleOff) status = times.length ? 'Present (Holiday)' : 'Holiday';
         else if (code === '25') status = 'Leave';
         else if (code === '26') status = 'Out';
         else if (!times.length) status = 'Absent';
