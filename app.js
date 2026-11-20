@@ -727,6 +727,25 @@
       }).join('');
     const line = (label, value, cls) => '<div><span>' + label + '</span><b' + (cls ? ' style="color:var(' + cls + ')"' : '') + '>' + value + '</b></div>';
 
+    // Which days each issue happened on, e.g. "Late: Mon 3 Nov · 12 min"
+    const has = (d, flag) => d.status.split(', ').includes(flag);
+    const dayName = (d) => d.day.slice(0, 1) + d.day.slice(1, 3).toLowerCase() + ' ' + fmtDate(d.date, false);
+    const whichGroups = [
+      { label: 'Late', tone: 't-warn', pick: (d) => has(d, 'Late'), note: (d) => 'in ' + d.inTime + ' · ' + d.lateMin + ' min late' },
+      { label: 'Late exit', tone: 't-warn', pick: (d) => has(d, 'Left Early'), note: (d) => 'out ' + d.outTime + ' · ' + d.earlyMin + ' min early' },
+      { label: 'Half day', tone: 't-half', pick: (d) => has(d, 'Half Day'), note: (d) => [d.inTime && 'in ' + d.inTime, d.outTime && 'out ' + d.outTime].filter(Boolean).join(' · ') },
+      { label: 'Extra work', tone: 't-info', pick: (d) => d.extraMin > 0, note: (d) => 'out ' + d.outTime + ' · ' + (d.extraMin >= 60 ? hours(d.extraMin) + ' h' : d.extraMin + ' min') },
+      { label: 'Absent', tone: 't-bad', pick: (d) => d.status === 'Absent', note: () => '' },
+      { label: 'Missed punch', tone: 't-miss', pick: (d) => has(d, 'Missed Punch'), note: (d) => d.punches ? 'only ' + d.punches : '' },
+    ];
+    const which = whichGroups.map((g) => {
+      const list = days.filter(g.pick);
+      return '<div class="which"><div class="which-head"><span class="pill ' + g.tone + '">' + g.label + '</span><small>' + plural(list.length, 'day') + '</small></div>' +
+        (list.length
+          ? '<ul>' + list.map((d) => '<li><b>' + dayName(d) + '</b>' + (g.note(d) ? '<span>' + esc(g.note(d)) + '</span>' : '') + '</li>').join('') + '</ul>'
+          : '<p class="dim">None</p>') + '</div>';
+    }).join('');
+
     $('drawer').innerHTML =
       '<div class="drawer-head"><span class="avatar">' + esc(initials(s.name)) + '</span><div style="flex:1;min-width:0"><h2>' + esc(s.name) + '</h2>' +
       '<p>ID ' + esc(s.id) + (s.dept ? ' · ' + esc(s.dept) : '') + '</p></div>' +
@@ -753,6 +772,8 @@
       '</div>' +
       '<div class="card"><div class="card-head"><div><h2>This period</h2></div></div>' +
         '<div class="legend">' + legendHtml(GROUPS) + '</div><div class="strip">' + strip + '</div></div>' +
+      '<div class="card"><div class="card-head"><div><h2>Which days</h2><p>When each late, half day and extra work happened</p></div></div>' +
+        '<div class="which-grid">' + which + '</div></div>' +
       '<div class="card"><div class="card-head"><div><h2>Day by day</h2></div></div><div class="table-wrap" style="max-height:none"><table>' +
         '<thead><tr><th>Date</th><th>In</th><th>Out</th><th>Status</th></tr></thead><tbody>' +
         days.map((d) => '<tr><td>' + d.day.slice(0, 1) + d.day.slice(1, 3).toLowerCase() + ', ' + fmtDate(d.date, false) + '</td><td class="num">' + (d.inTime || '—') +

@@ -19,6 +19,12 @@
     ignoreScheduleOff: false, // true = days off in the machine's schedule count as working days
   };
 
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // 'YYYY-MM-DD' -> '3 Nov'
+  function shortDate(iso) {
+    return Number(iso.slice(8, 10)) + ' ' + MONTHS[Number(iso.slice(5, 7)) - 1];
+  }
+
   function rows(XLSX, wb, name) {
     const ws = wb.Sheets[name];
     if (!ws) throw new Error('Sheet "' + name + '" not found in the file.');
@@ -192,6 +198,8 @@
       const lates = mine.filter((d) => d.lateCount > 0);
       const lateTimes = lates.reduce((total, d) => total + d.lateCount, 0);
       const early = mine.filter((d) => d.earlyMin > 0);
+      const halves = mine.filter((d) => d.status.includes('Half Day'));
+      const flags = (d) => d.status.split(', ');
 
       // Relief is per calendar month: the first FREE_LATES_PER_MONTH lates of each month are not charged
       const latesByMonth = {};
@@ -208,7 +216,14 @@
         lateRelief: lateTimes - chargedLates,
         chargedLates,
         lateFine: chargedLates * opt.lateFine,
-        halfDays: mine.filter((d) => d.status.includes('Half Day')).length,
+        halfDays: halves.length,
+        // Which days, for the sheet: "3 Nov (12 min late), 5 Nov (late exit)"
+        lateDates: lates.map((d) => shortDate(d.date) + ' (' + [
+          flags(d).includes('Late') && d.lateMin + ' min late',
+          flags(d).includes('Left Early') && 'late exit',
+        ].filter(Boolean).join(', ') + ')').join(', '),
+        halfDayDates: halves.map((d) => shortDate(d.date)).join(', '),
+        extraWorkDates: extra.map((d) => shortDate(d.date) + ' (' + d.extraMin + ' min)').join(', '),
         earlyTimes: early.length,
         earlyMin: early.reduce((total, d) => total + d.earlyMin, 0),
         overtimeWorkday: str(s[9]),

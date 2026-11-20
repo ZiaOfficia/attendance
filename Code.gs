@@ -22,6 +22,7 @@ const SUMMARY_HEADERS = [
   'OT Workday', 'OT Holiday', 'Scheduled Days', 'Present Days', 'Out Days',
   'Absent Days', 'Leave Days', 'Extra Work Days', 'Extra Work (Min)',
   'Half Days', 'Late Relief', 'Charged Lates', 'Late Fine (Rs)', 'Missed Punches', 'Worked on Holiday',
+  'Late Dates', 'Half Day Dates', 'Extra Work Dates',
 ];
 
 const PAYROLL_SHEET = 'Payroll';
@@ -73,6 +74,7 @@ function doPost(e) {
       r.lateTimes, r.lateMin, r.earlyTimes, r.earlyMin, r.overtimeWorkday, r.overtimeHoliday,
       r.scheduledDays, r.presentDays, r.outDays, r.absentDays, r.leaveDays, r.extraDays, r.extraMin,
       r.halfDays, r.lateRelief, r.chargedLates, r.lateFine, r.missedPunches, r.holidayWorkDays,
+      r.lateDates || '', r.halfDayDates || '', r.extraWorkDates || '',
     ]);
     const periodKey = (row) => row[0] + '|' + row[1] + '|' + row[2];
     const summary = upsert(ss, SUMMARY_SHEET, SUMMARY_HEADERS, summaryRows, periodKey);
