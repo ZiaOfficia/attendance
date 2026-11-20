@@ -15,7 +15,7 @@
 
   // ---------- Saved preferences (this browser only) ----------
   const STORE_KEY = 'attendance.v1';
-  const DEFAULT_SETTINGS = { basis: '30', half: '0.5', fine: 100, free: 2, ot: 'none', otRate: 0, paidLeaves: 2, ignoreOff: false };
+  const DEFAULT_SETTINGS = { basis: '30', half: '0.5', fine: 100, free: 2, ot: 'none', otRate: 0, paidLeaves: 2, ignoreOff: false, sundayOff: true };
   const saved = (() => { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; } })();
   const prefs = {
     salaries: saved.salaries || {},
@@ -120,6 +120,7 @@
     state.data = AttendanceParser.parse(XLSX, state.wb, {
       holidays: prefs.holidays,
       ignoreScheduleOff: s.ignoreOff === true,
+      sundaysOff: s.sundayOff !== false,
       lateFine: Math.max(0, Number(s.fine) || 0),
       freeLatesPerMonth: Math.max(0, Math.floor(Number(s.free) || 0)),
     });
@@ -449,9 +450,10 @@
     const cal = $('calendar');
     cal.style.gridTemplateColumns = '130px repeat(' + dates.length + ', minmax(28px, 1fr))';
     let html = '<span></span>' + dates.map((date) => {
-      const hol = prefs.holidays[date];
+      const hol = holidayOf(date);
+      const hint = autoHoliday(date) && !prefs.holidays[date] ? 'Every Sunday is a holiday' : hol ? 'Click to remove' : 'Click to mark as holiday';
       return '<button class="hd' + (hol ? ' hol' : '') + '" data-date="' + date + '" data-tip="' +
-        esc('<b>' + first[date].day + ', ' + fmtDate(date) + '</b><br>' + (hol ? 'Holiday: ' + esc(hol) + '<br>Click to remove' : 'Click to mark as holiday')) + '">' +
+        esc('<b>' + first[date].day + ', ' + fmtDate(date) + '</b><br>' + (hol ? 'Holiday: ' + esc(hol) + '<br>' : '') + hint) + '">' +
         Number(date.slice(8)) + '<small>' + first[date].day.slice(0, 2) + '</small></button>';
     }).join('');
     state.data.summary.forEach((s) => {
@@ -480,7 +482,16 @@
     if (nm) openDetail(nm.dataset.emp);
   });
 
+  // Sundays count as holidays automatically while the Sunday setting is on
+  const isSunday = (date) => new Date(date + 'T00:00:00').getDay() === 0;
+  const autoHoliday = (date) => (prefs.settings.sundayOff !== false && isSunday(date) ? 'Sunday' : '');
+  const holidayOf = (date) => prefs.holidays[date] || autoHoliday(date);
+
   function toggleHoliday(date) {
+    if (!prefs.holidays[date] && autoHoliday(date)) {
+      toast('Sundays are holidays automatically. Turn this off in Holidays & Rules.');
+      return;
+    }
     if (prefs.holidays[date]) {
       delete prefs.holidays[date];
       toast(fmtDate(date) + ' is a working day again');
@@ -654,10 +665,11 @@
     let html = WD.map((w) => '<div class="wd">' + w.slice(0, 1) + w.slice(1).toLowerCase() + '</div>').join('');
     for (let i = 0; i < lead; i++) html += '<div class="day blank"></div>';
     dates.forEach((date) => {
-      const hol = prefs.holidays[date];
+      const hol = holidayOf(date);
+      const auto = !prefs.holidays[date] && autoHoliday(date);
       const off = info[date].machineOff;
       html += '<button class="day' + (hol ? ' hol' : off ? ' sched-off' : '') + '" data-date="' + date + '" title="' +
-        (hol ? 'Holiday: ' + esc(hol) + ' (click to remove)' : off ? 'Off in machine schedule' : 'Click to mark as holiday') + '">' +
+        (auto ? 'Every Sunday is a holiday' : hol ? 'Holiday: ' + esc(hol) + ' (click to remove)' : off ? 'Off in machine schedule' : 'Click to mark as holiday') + '">' +
         '<b>' + Number(date.slice(8)) + '</b><small>' + (hol ? esc(hol) : off ? 'Off' : '') + '</small></button>';
     });
     $('dayPicker').innerHTML = html;
@@ -673,6 +685,7 @@
     $('r-basis').value = s.basis; $('r-half').value = s.half; $('r-fine').value = s.fine; $('r-free').value = s.free;
     $('r-ot').value = s.ot; $('r-otRate').value = s.otRate; $('r-paidLeaves').value = s.paidLeaves;
     $('r-ignoreOff').checked = s.ignoreOff === true;
+    $('r-sundayOff').checked = s.sundayOff !== false;
     $('r-otRateWrap').classList.toggle('hidden', s.ot !== 'fixed');
   }
 
@@ -688,7 +701,7 @@
     if (b) toggleHoliday(b.dataset.remove);
   });
 
-  const RULES = { 'r-basis': 'basis', 'r-half': 'half', 'r-fine': 'fine', 'r-free': 'free', 'r-ot': 'ot', 'r-otRate': 'otRate', 'r-paidLeaves': 'paidLeaves', 'r-ignoreOff': 'ignoreOff' };
+  const RULES = { 'r-basis': 'basis', 'r-half': 'half', 'r-fine': 'fine', 'r-free': 'free', 'r-ot': 'ot', 'r-otRate': 'otRate', 'r-paidLeaves': 'paidLeaves', 'r-ignoreOff': 'ignoreOff', 'r-sundayOff': 'sundayOff' };
   Object.keys(RULES).forEach((id) => $(id).addEventListener('change', (e) => {
     prefs.settings[RULES[id]] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
     persist();

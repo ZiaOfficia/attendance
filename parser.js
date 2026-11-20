@@ -15,6 +15,7 @@
     lateFine: 100, // Rs per chargeable late
     freeLatesPerMonth: 2, // First lates each month are not charged
     holidays: {}, // 'YYYY-MM-DD' -> name; days off entered by hand, on top of the machine's schedule
+    sundaysOff: true, // true = every Sunday is a holiday
     ignoreScheduleOff: false, // true = days off in the machine's schedule count as working days
   };
 
@@ -129,7 +130,7 @@
         let earlyMin = 0;
         let lateCount = 0; // Lates charged against this day: late entry and late-counted exit each count once
 
-        const holiday = opt.holidays[day.iso] || '';
+        const holiday = opt.holidays[day.iso] || (opt.sundaysOff && day.dayName === 'SUN' ? 'Sunday' : '');
 
         // No shift code = off in the machine's schedule, unless those offs are ignored
         const scheduleOff = !opt.ignoreScheduleOff && (code === '' || code === undefined);
