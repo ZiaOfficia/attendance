@@ -4,8 +4,18 @@
   'use strict';
 
   const DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
-  const EXTRA_WORK_AFTER = 18 * 60 + 30; // Leaving after 6:30 PM counts as extra work
-  const LATE_ALLOWANCE = { '9': 2 }; // Employee ID -> lates taken off the period total (9 = ABDULLAH)
+  // Office rules (minutes since midnight)
+  const SHIFT_START = 10 * 60 + 45; // 10:45 AM entry, every working day
+  const HALF_DAY_AFTER = 11 * 60 + 30; // Punching in after 11:30 AM is a half day
+  // Exit rules. Leaving before halfDayBefore = half day; before lateBefore = a late;
+  // lateBefore up to end = grace; after end = extra work (overtime).
+  const WEEKDAY_EXIT = { halfDayBefore: 17 * 60 + 30, lateBefore: 18 * 60 + 15, end: 18 * 60 + 30 }; // 5:30, 6:15, 6:30 PM
+  const SATURDAY_EXIT = { halfDayBefore: 15 * 60 + 30, lateBefore: 16 * 60 + 15, end: 16 * 60 + 30 }; // 3:30, 4:15, 4:30 PM
+  const DEFAULTS = {
+    lateFine: 100, // Rs per chargeable late
+    freeLatesPerMonth: 2, // First lates each month are not charged
+    holidays: {}, // 'YYYY-MM-DD' -> name; days off entered by hand, on top of the machine's schedule
+  };
 
   function rows(XLSX, wb, name) {
     const ws = wb.Sheets[name];
@@ -50,7 +60,8 @@
     return h * 60 + m;
   }
 
-  function parse(XLSX, wb) {
+  function parse(XLSX, wb, options) {
+    const opt = Object.assign({}, DEFAULTS, options);
     const sched = rows(XLSX, wb, 'Schedule Infor.');
     const stat = rows(XLSX, wb, 'Att. Stat.');
     const log = rows(XLSX, wb, 'Att.log report');
@@ -109,16 +120,39 @@
         const inTime = loneOut ? '' : times[0] || '';
         const outTime = times.length > 1 ? times[times.length - 1] : loneOut ? times[0] : '';
 
+        const exit = day.dayName === 'SAT' ? SATURDAY_EXIT : WEEKDAY_EXIT;
+        const shiftEnd = exit.end;
+        const inMin = inTime ? minutes(inTime) : null;
+        const outMin = times.length > 1 || loneOut ? minutes(outTime) : null;
+        let lateMin = 0;
+        let earlyMin = 0;
+        let lateCount = 0; // Lates charged against this day: late entry and late-counted exit each count once
+
+        const holiday = opt.holidays[day.iso] || '';
+
         let status;
-        if (code === '25') status = 'Leave';
+        if (holiday || code === '' || code === undefined) status = times.length ? 'Present (Holiday)' : 'Holiday';
+        else if (code === '25') status = 'Leave';
         else if (code === '26') status = 'Out';
-        else if (code === '' || code === undefined) status = times.length ? 'Present (Holiday)' : 'Holiday';
         else if (!times.length) status = 'Absent';
-        else if (times.length === 1) status = 'Missed Punch';
         else {
           const flags = [];
-          if (ex.late > 0) flags.push('Late');
-          if (ex.early > 0) flags.push('Left Early');
+          if (inMin !== null && inMin > HALF_DAY_AFTER) flags.push('Half Day');
+          else if (inMin !== null && inMin > SHIFT_START) {
+            flags.push('Late');
+            lateMin = inMin - SHIFT_START;
+            lateCount++;
+          }
+          if (times.length > 1 && outMin < shiftEnd) {
+            earlyMin = shiftEnd - outMin;
+            if (outMin < exit.halfDayBefore) {
+              if (!flags.includes('Half Day')) flags.push('Half Day');
+            } else if (outMin < exit.lateBefore) {
+              flags.push('Left Early');
+              lateCount++;
+            } else earlyMin = 0; // Grace window (6:15-6:29 PM, Sat 4:15-4:29 PM): not flagged or counted
+          }
+          if (times.length === 1) flags.push('Missed Punch');
           status = flags.length ? flags.join(', ') : 'Present';
         }
 
@@ -131,11 +165,13 @@
           inTime,
           outTime,
           punches: times.join(' '),
-          lateMin: ex.late,
-          earlyMin: ex.early,
+          lateMin,
+          earlyMin,
+          lateCount,
           absenceMin: ex.absence,
-          extraMin: outTime ? Math.max(0, minutes(outTime) - EXTRA_WORK_AFTER) : 0,
+          extraMin: outMin !== null ? Math.max(0, outMin - shiftEnd) : 0,
           status,
+          holiday,
         });
       });
     });
@@ -145,23 +181,41 @@
       const s = stat[r];
       const id = str(s[0]);
       if (!id) continue;
-      const days = str(s[11]).split('/');
-      const extra = daily.filter((d) => d.id === id && d.extraMin > 0);
+      const mine = daily.filter((d) => d.id === id);
+      const countOf = (fn) => mine.filter((d) => fn(d.status)).length;
+      const extra = mine.filter((d) => d.extraMin > 0);
+      const lates = mine.filter((d) => d.lateCount > 0);
+      const lateTimes = lates.reduce((total, d) => total + d.lateCount, 0);
+      const early = mine.filter((d) => d.earlyMin > 0);
+
+      // Relief is per calendar month: the first FREE_LATES_PER_MONTH lates of each month are not charged
+      const latesByMonth = {};
+      lates.forEach((d) => (latesByMonth[d.date.slice(0, 7)] = (latesByMonth[d.date.slice(0, 7)] || 0) + d.lateCount));
+      const chargedLates = Object.values(latesByMonth)
+        .reduce((total, n) => total + Math.max(0, n - opt.freeLatesPerMonth), 0);
+
       summary.push({
         id,
         name: str(s[1]),
         dept: str(s[2]),
-        lateTimes: Math.max(0, num(s[5]) - (LATE_ALLOWANCE[id] || 0)),
-        lateMin: num(s[6]),
-        earlyTimes: num(s[7]),
-        earlyMin: num(s[8]),
+        lateTimes,
+        lateMin: lates.reduce((total, d) => total + d.lateMin, 0),
+        lateRelief: lateTimes - chargedLates,
+        chargedLates,
+        lateFine: chargedLates * opt.lateFine,
+        halfDays: mine.filter((d) => d.status.includes('Half Day')).length,
+        earlyTimes: early.length,
+        earlyMin: early.reduce((total, d) => total + d.earlyMin, 0),
         overtimeWorkday: str(s[9]),
         overtimeHoliday: str(s[10]),
-        scheduledDays: num(days[0]),
-        presentDays: num(days[1]),
-        outDays: num(s[12]),
-        absentDays: num(s[13]),
-        leaveDays: num(s[14]),
+        // Day counts come from the daily records so hand-entered holidays are reflected
+        scheduledDays: countOf((st) => st !== 'Holiday' && st !== 'Present (Holiday)'),
+        presentDays: countOf((st) => !['Absent', 'Holiday', 'Leave', 'Out', 'Present (Holiday)'].includes(st)),
+        holidayWorkDays: countOf((st) => st === 'Present (Holiday)'),
+        outDays: countOf((st) => st === 'Out'),
+        absentDays: countOf((st) => st === 'Absent'),
+        leaveDays: countOf((st) => st === 'Leave'),
+        missedPunches: countOf((st) => st.split(', ').includes('Missed Punch')),
         extraDays: extra.length,
         extraMin: extra.reduce((total, d) => total + d.extraMin, 0),
       });
@@ -170,7 +224,7 @@
     return { period: { from: period.from, to: period.to }, daily, summary };
   }
 
-  const api = { parse };
+  const api = { parse, DEFAULTS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.AttendanceParser = api;
 })(this);
