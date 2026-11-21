@@ -17,6 +17,9 @@
     holidays: {}, // 'YYYY-MM-DD' -> name; days off entered by hand, on top of the machine's schedule
     sundaysOff: true, // true = every Sunday is a holiday
     ignoreScheduleOff: false, // true = days off in the machine's schedule count as working days
+    // 'YYYY-MM-DD' -> {name, after}: party / event days where staying late is not extra work.
+    // after = 'HH:MM' counts only the time past it; blank = no extra work that day.
+    noExtraDays: {},
   };
 
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -167,6 +170,15 @@
           status = flags.length ? flags.join(', ') : 'Present';
         }
 
+        // Extra work: time past the shift end, or only past the cutoff on a party / event day
+        const extraRawMin = outMin !== null ? Math.max(0, outMin - shiftEnd) : 0;
+        const event = opt.noExtraDays[day.iso];
+        let extraMin = extraRawMin;
+        if (event) {
+          const after = /^\d{1,2}:\d{2}$/.test(event.after || '') ? Math.max(shiftEnd, minutes(event.after)) : Infinity;
+          extraMin = outMin !== null && outMin > after ? outMin - after : 0;
+        }
+
         daily.push({
           id: emp.id,
           name: emp.name,
@@ -180,7 +192,9 @@
           earlyMin,
           lateCount,
           absenceMin: ex.absence,
-          extraMin: outMin !== null ? Math.max(0, outMin - shiftEnd) : 0,
+          extraMin,
+          extraRawMin, // Before any party / event cutoff
+          extraNote: event ? event.name || 'Event' : '',
           status,
           holiday,
         });
@@ -238,6 +252,9 @@
         missedPunches: countOf((st) => st.split(', ').includes('Missed Punch')),
         extraDays: extra.length,
         extraMin: extra.reduce((total, d) => total + d.extraMin, 0),
+        // Time stayed late on party / event days, not counted as extra work
+        eventMin: mine.reduce((total, d) => total + d.extraRawMin - d.extraMin, 0),
+        eventDays: mine.filter((d) => d.extraRawMin > d.extraMin).length,
       });
     }
 

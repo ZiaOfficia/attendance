@@ -7,10 +7,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=3">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-  <script src="parser.js"></script>
+  <script src="parser.js?v=3"></script>
 </head>
 <body>
   <header class="topbar">
@@ -61,8 +61,12 @@
     <!-- Dashboard -->
     <section id="tab-dashboard" class="hidden">
       <div class="page-head">
-        <div><h1>Dashboard</h1><p id="dashSub"></p></div>
+        <div><h1 id="dashTitle">Dashboard</h1><p id="dashSub"></p></div>
+        <label class="field dash-pick"><span>Show</span>
+          <select class="input" id="dashEmp" aria-label="Choose an employee"></select></label>
       </div>
+      <div id="dashOne" class="hidden"></div>
+      <div id="dashAll">
       <div class="grid kpis" id="kpis"></div>
 
       <div class="card" style="margin-top:16px">
@@ -84,7 +88,8 @@
 
       <div class="grid two">
         <div class="card">
-          <div class="card-head"><div><h2>Overtime</h2><p>Hours after 6:30 PM (4:30 PM on Saturday)</p></div></div>
+          <div class="card-head"><div><h2>Overtime</h2><p>Hours after 6:30 PM (4:30 PM on Saturday). Time on party / event days is shown separately and not paid.</p></div></div>
+          <div class="legend" id="otLegend"></div>
           <div class="chart-box" id="otBox"><canvas id="otChart" aria-label="Overtime hours by employee"></canvas></div>
         </div>
         <div class="card">
@@ -92,6 +97,13 @@
           <div class="legend" id="payLegend"></div>
           <div class="chart-box" id="payBox"><canvas id="payChart" aria-label="Salary breakdown by employee"></canvas></div>
         </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div><h2>Party / event time</h2><p>Time people stayed late on party or event days. Kept out of overtime and overtime pay.</p></div>
+          <button class="btn ghost sm" id="goEvents">Mark party days</button></div>
+        <div id="eventBox"></div>
+      </div>
       </div>
     </section>
 
@@ -151,12 +163,20 @@
         <div><h1>Holidays &amp; Rules</h1><p>Changes apply immediately and are remembered in this browser.</p></div>
       </div>
       <div class="grid two">
+        <div>
         <div class="card">
           <div class="card-head"><div><h2>Holidays</h2><p>Click a day to mark the office as closed. Grey days are already off in the machine's schedule.</p></div></div>
           <label class="check" style="margin-bottom:10px"><input type="checkbox" id="r-sundayOff">Every Sunday is a holiday</label>
           <label class="check" style="margin-bottom:14px"><input type="checkbox" id="r-ignoreOff">Ignore the machine's off days (only holidays I mark count)</label>
           <div class="days" id="dayPicker"></div>
           <div class="hol-list" id="holList"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>Party / event days</h2><p>Click a day when everyone stayed late for a party, birthday or event. Staying late that day is not counted as extra work. Numbers show how many people stayed late.</p></div></div>
+          <div class="days" id="evtPicker"></div>
+          <div class="hol-list" id="evtList"></div>
+          <p class="note">Leave <b>Count extra after</b> empty to ignore all extra work that day, or set a time (for example 9:00 PM when the party ended) to still count work done after it.</p>
+        </div>
         </div>
         <div>
           <div class="card">
@@ -228,6 +248,6 @@
   <div class="tip" id="tip" hidden></div>
   <div class="toast" id="toast" role="status"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

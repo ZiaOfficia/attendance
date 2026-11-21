@@ -20,6 +20,7 @@
   const prefs = {
     salaries: saved.salaries || {},
     holidays: saved.holidays || {},
+    noExtra: saved.noExtra || {}, // 'YYYY-MM-DD' -> {name, after}: party / event days, extra work not counted
     settings: Object.assign({}, DEFAULT_SETTINGS, saved.settings),
     url: saved.url || '',
     theme: saved.theme || '',
@@ -28,7 +29,7 @@
     try { localStorage.setItem(STORE_KEY, JSON.stringify(prefs)); } catch (e) { /* storage unavailable: keep working in memory */ }
   }
 
-  const state = { wb: null, fileName: '', data: null, pay: [], tab: 'dashboard' };
+  const state = { wb: null, fileName: '', data: null, pay: [], tab: 'dashboard', dashEmp: '' };
   const charts = {};
 
   // ---------- Status groups (stack order validated for colour separation) ----------
@@ -119,6 +120,7 @@
     const s = prefs.settings;
     state.data = AttendanceParser.parse(XLSX, state.wb, {
       holidays: prefs.holidays,
+      noExtraDays: prefs.noExtra,
       ignoreScheduleOff: s.ignoreOff === true,
       sundaysOff: s.sundayOff !== false,
       lateFine: Math.max(0, Number(s.fine) || 0),
@@ -190,6 +192,7 @@
       esc(fmtDate(p.from) + ' – ' + fmtDate(p.to));
     $('dashSub').textContent = state.fileName + ' · ' + state.data.summary.length + ' employees';
     renderKpis();
+    renderDashPicker();
     renderCalendar();
     renderEmpFilter();
     renderDailyTable();
@@ -235,6 +238,8 @@
       kpi('Half days', tot('halfDays'), 'half', 't-half', 'Late arrival or early exit'),
       kpi('Absent days', tot('absentDays'), 'x', 't-bad', tot('missedPunches') + ' missed punches to check'),
       kpi('Late fines', rs(tot('lateFine')), 'coin', 't-warn', 'Rs ' + prefs.settings.fine + ' per charged late'),
+      kpi('Overtime', hours(tot('extraMin')) + '<small>h</small>', 'plus', 't-info',
+        tot('eventMin') ? '+' + hours(tot('eventMin')) + ' h party / event, not counted' : 'No party days marked'),
       kpi('Net payroll', withSalary.length ? rs(net) : '—', 'wallet', 't-info',
         withSalary.length ? withSalary.length + ' of ' + sum.length + ' salaries entered' : 'Enter salaries in Payroll'),
     ].join('');
@@ -293,8 +298,32 @@
     $(boxId).innerHTML = '<div class="empty">' + msg + '</div>';
   }
 
+  // ---------- Dashboard employee picker ----------
+  function renderDashPicker() {
+    const sel = $('dashEmp');
+    const sum = state.data.summary;
+    if (!sum.some((s) => s.id === state.dashEmp)) state.dashEmp = '';
+    sel.innerHTML = '<option value="">All employees</option>' +
+      sum.map((s) => '<option value="' + esc(s.id) + '">' + esc(s.name) + ' (ID ' + esc(s.id) + ')</option>').join('');
+    sel.value = state.dashEmp;
+  }
+  $('dashEmp').addEventListener('change', (e) => {
+    state.dashEmp = e.target.value;
+    renderCharts();
+    window.scrollTo({ top: 0 });
+  });
+
   function renderCharts() {
     if (!state.data || state.tab !== 'dashboard') return;
+    const one = state.data.summary.find((s) => s.id === state.dashEmp);
+    $('dashAll').classList.toggle('hidden', !!one);
+    $('dashOne').classList.toggle('hidden', !one);
+    $('dashTitle').textContent = one ? one.name : 'Dashboard';
+    $('dashSub').textContent = one
+      ? 'ID ' + one.id + (one.dept ? ' · ' + one.dept : '') + ' · ' + fmtDate(state.data.period.from) + ' – ' + fmtDate(state.data.period.to)
+      : state.fileName + ' · ' + state.data.summary.length + ' employees';
+    if (one) { ['daily', 'rate', 'fine', 'ot', 'pay'].forEach((k) => { if (charts[k]) { charts[k].destroy(); delete charts[k]; } }); renderPerson(one); return; }
+    ['pTimes', 'pExtra', 'pStatus'].forEach((k) => { if (charts[k]) { charts[k].destroy(); delete charts[k]; } });
     renderDailyChart();
     const sum = state.data.summary;
 
@@ -314,14 +343,93 @@
         fined[i].chargedLates + ' × Rs ' + prefs.settings.fine],
     });
 
-    const ot = sum.filter((s) => s.extraMin > 0).sort((a, b) => b.extraMin - a.extraMin);
-    if (!ot.length) emptyBox('ot', 'otBox', 'Nobody worked overtime in this period.');
-    else hbar('ot', 'otBox', ot.map((s) => s.name), ot.map((s) => +(s.extraMin / 60).toFixed(1)), {
-      fmt: (v) => v + ' h',
-      tip: (i) => [ot[i].extraDays + ' days · ' + ot[i].extraMin + ' min', payOf(ot[i].id).otPay ? 'Overtime pay ' + rs(payOf(ot[i].id).otPay) : ''],
-    });
+    renderOtChart(sum);
+    renderEventBox();
 
     renderPayChart();
+  }
+
+  // Party / event days: totals per day and per person, kept apart from overtime
+  const minText = (m) => (m >= 60 ? hours(m) + ' h' : m + ' min');
+  function renderEventBox() {
+    const daily = state.data.daily;
+    const dates = Object.keys(prefs.noExtra).filter((d) => daily.some((x) => x.date === d)).sort();
+    if (!dates.length) {
+      // Suggest the days when the most people stayed late
+      const stayed = {};
+      daily.forEach((d) => { if (d.extraRawMin > 0) stayed[d.date] = (stayed[d.date] || 0) + 1; });
+      const top = Object.keys(stayed).sort((a, b) => stayed[b] - stayed[a]).slice(0, 3);
+      $('eventBox').innerHTML = '<p class="note" style="margin:0">No party or event days are marked, so all late stays count as overtime.' +
+        (top.length ? ' Days when the most people stayed late: ' + top.map((d) => '<b>' + fmtDate(d, false) + '</b> (' + stayed[d] + ' people)').join(', ') + '.' : '') + '</p>';
+      return;
+    }
+    const rows = dates.map((date) => {
+      const ppl = daily.filter((d) => d.date === date && d.extraRawMin > d.extraMin);
+      const min = ppl.reduce((t, d) => t + d.extraRawMin - d.extraMin, 0);
+      const ev = prefs.noExtra[date];
+      return '<tr><td><b>' + esc(ev.name) + '</b><small class="sub">' + first(date).day.slice(0, 1) + first(date).day.slice(1, 3).toLowerCase() + ', ' + fmtDate(date) +
+        (ev.after ? ' · counted after ' + esc(ev.after) : '') + '</small></td>' +
+        '<td class="r">' + ppl.length + '</td><td class="r">' + (min ? minText(min) : '—') + '</td>' +
+        '<td>' + (ppl.length ? ppl.sort((a, b) => (b.extraRawMin - b.extraMin) - (a.extraRawMin - a.extraMin))
+          .map((d) => esc(d.name) + ' <span class="dim">' + minText(d.extraRawMin - d.extraMin) + '</span>').join(', ') : '<span class="dim">Nobody stayed late</span>') + '</td></tr>';
+    });
+    const total = state.data.summary.reduce((t, s) => t + s.eventMin, 0);
+    $('eventBox').innerHTML = '<div class="table-wrap" style="max-height:none"><table><thead><tr><th>Event</th><th class="r">People</th>' +
+      '<th class="r">Not counted</th><th>Who stayed</th></tr></thead><tbody>' + rows.join('') + '</tbody>' +
+      '<tfoot><tr><td>Total</td><td></td><td class="r">' + minText(total) + '</td><td></td></tr></tfoot></table></div>';
+  }
+  const first = (date) => state.data.daily.find((d) => d.date === date);
+  $('goEvents').addEventListener('click', () => showTab('settings'));
+
+  // Overtime per employee: counted overtime, with party / event time stacked separately in grey
+  function renderOtChart(sum) {
+    const ot = sum.filter((s) => s.extraMin > 0 || s.eventMin > 0).sort((a, b) => b.extraMin - a.extraMin || b.eventMin - a.eventMin);
+    const anyEvent = ot.some((s) => s.eventMin > 0);
+    $('otLegend').innerHTML = anyEvent
+      ? '<span><i style="background:var(--s1)"></i>Overtime (counted)</span><span><i style="background:var(--axis)"></i>Party / event (not counted)</span>' : '';
+    if (!ot.length) { emptyBox('ot', 'otBox', 'Nobody worked overtime in this period.'); return; }
+    const h = (min) => +(min / 60).toFixed(1);
+    const box = $('otBox');
+    box.style.height = Math.max(120, ot.length * 32 + 36) + 'px';
+    const base = baseOptions();
+    const surface = cssVar('--surface');
+    makeChart('ot', 'otBox', {
+      type: 'bar',
+      data: {
+        labels: ot.map((s) => s.name),
+        datasets: [
+          { label: 'Overtime (counted)', data: ot.map((s) => h(s.extraMin)), backgroundColor: cssVar('--s1') },
+          { label: 'Party / event (not counted)', data: ot.map((s) => h(s.eventMin)), backgroundColor: cssVar('--axis') },
+        ].map((d) => Object.assign(d, { borderColor: surface, borderWidth: { right: 2 }, borderSkipped: false, borderRadius: 3, maxBarThickness: 16 })),
+      },
+      options: Object.assign(base, {
+        indexAxis: 'y',
+        layout: { padding: { right: 110 } },
+        interaction: { mode: 'index', intersect: false, axis: 'y' },
+        scales: {
+          x: axis({ stacked: true, beginAtZero: true, ticks: { display: false } }),
+          y: axis({ stacked: true, grid: { display: false }, ticks: { color: cssVar('--text'), font: { size: 12.5 }, autoSkip: false } }),
+        },
+        plugins: Object.assign(base.plugins, {
+          // Label shows counted hours, plus party hours in brackets when there are any
+          endLabels: { format: (v, i) => h(ot[i].extraMin) + ' h' + (ot[i].eventMin ? ' (+' + h(ot[i].eventMin) + ' party)' : ''), totals: ot.map((s) => s.extraMin) },
+          tooltip: Object.assign(base.plugins.tooltip, {
+            filter: (it) => it.raw > 0,
+            callbacks: {
+              label: (it) => ' ' + it.dataset.label + ': ' + it.raw + ' h',
+              footer: (items) => {
+                const s = ot[items[0].dataIndex];
+                const pay = payOf(s.id).otPay;
+                return [s.extraDays + ' overtime days · ' + s.extraMin + ' min',
+                  s.eventMin ? s.eventDays + ' party / event days · ' + s.eventMin + ' min' : '',
+                  pay ? 'Overtime pay ' + rs(pay) : ''].filter(Boolean);
+              },
+            },
+          }),
+        }),
+      }),
+      plugins: [endLabels],
+    });
   }
 
   function renderDailyChart() {
@@ -440,6 +548,131 @@
     });
   }
 
+  // ---------- One employee's dashboard ----------
+  const clock = (h) => { const hh = Math.floor(h), mm = Math.round((h - hh) * 60); const p = hh >= 12 ? 'PM' : 'AM'; return ((hh + 11) % 12 + 1) + ':' + String(mm).padStart(2, '0') + ' ' + p; };
+  const toHours = (t) => { const [h, m] = t.split(':').map(Number); return h + m / 60; };
+
+  // Dashed reference lines across a chart at given y values
+  const refLines = {
+    id: 'refLines',
+    afterDatasetsDraw(chart, args, opts) {
+      if (!opts || !opts.lines) return;
+      const { ctx, chartArea: a, scales: { y } } = chart;
+      ctx.save();
+      ctx.font = '500 11px ' + Chart.defaults.font.family;
+      opts.lines.forEach((l) => {
+        const py = y.getPixelForValue(l.v);
+        ctx.strokeStyle = cssVar('--muted'); ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+        ctx.setLineDash([]); ctx.fillStyle = cssVar('--muted'); ctx.textAlign = 'right';
+        ctx.fillText(l.label, a.right - 4, py - 5);
+      });
+      ctx.restore();
+    },
+  };
+
+  function renderPerson(s) {
+    const p = payOf(s.id);
+    const days = state.data.daily.filter((d) => d.id === s.id);
+    const notCounted = days.reduce((t, d) => t + d.extraRawMin - d.extraMin, 0);
+    const rate = s.scheduledDays ? Math.round((s.presentDays / s.scheduledDays) * 100) : 0;
+    const card = (title, sub, body) => '<div class="card"><div class="card-head"><div><h2>' + title + '</h2>' + (sub ? '<p>' + sub + '</p>' : '') + '</div></div>' + body + '</div>';
+
+    $('dashOne').innerHTML =
+      '<div class="grid kpis">' +
+        kpi('Attendance', rate + '<small>%</small>', 'check', 't-good', s.presentDays + ' of ' + s.scheduledDays + ' working days') +
+        kpi('Lates', s.lateTimes, 'clock', 't-warn', s.chargedLates + ' charged · ' + rs(s.lateFine)) +
+        kpi('Half days', s.halfDays, 'half', 't-half', p.halfDed ? '−' + rs(p.halfDed) : '') +
+        kpi('Absent / leave', s.absentDays + s.leaveDays, 'x', 't-bad', s.absentDays + ' absent · ' + s.leaveDays + ' leave') +
+        kpi('Extra work', hours(s.extraMin) + '<small>h</small>', 'plus', 't-info', s.extraDays + ' days' + (notCounted ? ' · ' + hours(notCounted) + ' h not counted' : '')) +
+        kpi('Net pay', p.hasSalary ? rs(p.net) : '—', 'wallet', 't-info', p.hasSalary ? 'Salary ' + rs(p.salary) : 'Enter salary in Payroll') +
+      '</div>' +
+      card('In and out times', 'Each bar runs from check-in to check-out, coloured by status',
+        '<div class="legend">' + legendHtml(GROUPS) + '</div><div class="chart-box" id="pTimesBox" style="height:300px"></div>') +
+      '<div class="grid two">' +
+        card('Extra work by day', 'Minutes after shift end' + (notCounted ? ' · grey = party / event, not counted' : ''),
+          '<div class="chart-box" id="pExtraBox" style="height:240px"></div>') +
+        card('Days by status', 'How each working day went', '<div class="chart-box" id="pStatusBox"></div>') +
+      '</div>' +
+      '<div class="grid two">' +
+        card('Salary', 'For this period', breakdownHtml(p)) +
+        card('Which days', 'When each late, half day and extra work happened', whichHtml(days)) +
+      '</div>' +
+      card('Day by day', '', dayTableHtml(days));
+
+    // In / out floating bars
+    const labels = days.map((d) => [String(Number(d.date.slice(8))), d.day.slice(0, 2)]);
+    const span = days.map((d) => {
+      if (!d.inTime && !d.outTime) return null;
+      const a = d.inTime ? toHours(d.inTime) : toHours(d.outTime) - 0.1;
+      const b = d.outTime && d.outTime !== d.inTime ? toHours(d.outTime) : a + 0.1;
+      return [a, b];
+    });
+    const all = span.filter(Boolean).flat();
+    const base = baseOptions();
+    makeChart('pTimes', 'pTimesBox', {
+      type: 'bar',
+      data: { labels, datasets: [{
+        data: span,
+        backgroundColor: days.map((d) => { const g = groupOf(d.status); return cssVar(g ? g.color : '--axis'); }),
+        borderRadius: 4, borderSkipped: false, maxBarThickness: 22,
+      }] },
+      options: Object.assign(base, {
+        scales: {
+          x: axis({ grid: { display: false } }),
+          y: axis({
+            min: Math.floor(Math.min(10, ...all)), max: Math.ceil(Math.max(19, ...all)),
+            ticks: { stepSize: 1, color: cssVar('--muted'), font: { size: 11 }, callback: (v) => clock(v) },
+          }),
+        },
+        plugins: Object.assign(base.plugins, {
+          refLines: { lines: [{ v: 10.75, label: 'Entry 10:45 AM' }, { v: 18.5, label: 'Exit 6:30 PM (Sat 4:30)' }] },
+          tooltip: Object.assign(base.plugins.tooltip, {
+            displayColors: false,
+            callbacks: {
+              title: (it) => { const d = days[it[0].dataIndex]; return d.day + ', ' + fmtDate(d.date); },
+              label: (it) => { const d = days[it.dataIndex]; return [d.inTime && 'In ' + d.inTime, d.outTime && 'Out ' + d.outTime].filter(Boolean).join(' · '); },
+              afterLabel: (it) => { const d = days[it.dataIndex]; return [d.status, d.lateMin && d.lateMin + ' min late', d.extraMin && d.extraMin + ' min extra',
+                d.extraRawMin > d.extraMin && d.extraNote + ': ' + (d.extraRawMin - d.extraMin) + ' min not counted'].filter(Boolean); },
+            },
+          }),
+        }),
+      }),
+      plugins: [refLines],
+    });
+
+    // Extra work: counted vs not counted (party / event days)
+    const b2 = baseOptions();
+    makeChart('pExtra', 'pExtraBox', {
+      type: 'bar',
+      data: { labels, datasets: [
+        { label: 'Counted', data: days.map((d) => d.extraMin), backgroundColor: cssVar('--s1'), borderRadius: 3, maxBarThickness: 18 },
+        { label: 'Not counted (event)', data: days.map((d) => d.extraRawMin - d.extraMin), backgroundColor: cssVar('--axis'), borderRadius: 3, maxBarThickness: 18 },
+      ] },
+      options: Object.assign(b2, {
+        interaction: { mode: 'index', intersect: false },
+        scales: { x: axis({ stacked: true, grid: { display: false } }), y: axis({ stacked: true, beginAtZero: true, ticks: { precision: 0, color: cssVar('--muted'), font: { size: 11 }, callback: (v) => v + 'm' } }) },
+        plugins: Object.assign(b2.plugins, {
+          tooltip: Object.assign(b2.plugins.tooltip, {
+            filter: (it) => it.raw > 0,
+            callbacks: {
+              title: (it) => { const d = days[it[0].dataIndex]; return d.day + ', ' + fmtDate(d.date) + (d.outTime ? ' · out ' + d.outTime : ''); },
+              label: (it) => ' ' + it.dataset.label + ': ' + it.raw + ' min' + (it.datasetIndex === 1 ? ' (' + days[it.dataIndex].extraNote + ')' : ''),
+            },
+          }),
+        }),
+      }),
+    });
+
+    // Days by status
+    const counts = GROUPS.map((g) => days.filter((d) => groupOf(d.status) === g).length);
+    const shown = GROUPS.map((g, i) => ({ g, n: counts[i] })).filter((x) => x.n > 0);
+    if (!shown.length) { emptyBox('pStatus', 'pStatusBox', 'No working days in this period.'); return; }
+    hbar('pStatus', 'pStatusBox', shown.map((x) => x.g.label), shown.map((x) => x.n), { fmt: (v) => plural(v, 'day') });
+    charts.pStatus.data.datasets[0].backgroundColor = shown.map((x) => cssVar(x.g.color));
+    charts.pStatus.update('none');
+  }
+
   // ---------- Calendar heatmap ----------
   function renderCalendar() {
     const dates = [...new Set(state.data.daily.map((d) => d.date))];
@@ -464,7 +697,8 @@
         const g = groupOf(d.status);
         const times = [d.inTime && 'In ' + d.inTime, d.outTime && 'Out ' + d.outTime].filter(Boolean).join(' · ');
         const mins = [d.lateMin && d.lateMin + ' min late', d.earlyMin && d.earlyMin + ' min before shift end',
-          d.extraMin && d.extraMin + ' min overtime'].filter(Boolean).join('<br>');
+          d.extraMin && d.extraMin + ' min overtime',
+          d.extraNote && d.extraRawMin > d.extraMin && esc(d.extraNote) + ': ' + (d.extraRawMin - d.extraMin) + ' min not counted'].filter(Boolean).join('<br>');
         const tip = '<b>' + esc(s.name) + '</b><br>' + d.day + ', ' + fmtDate(date) + '<br>' +
           (g ? '<i class="' + g.cls + '"></i>' : '') + esc(d.holiday ? d.status + ' (' + d.holiday + ')' : d.status) +
           (times ? '<br>' + times : '') + (mins ? '<br>' + mins : '');
@@ -535,7 +769,8 @@
         '<td class="num">' + (d.inTime || dash) + '</td><td class="num">' + (d.outTime || dash) + '</td>' +
         '<td>' + pill(d.status) + (d.holiday ? ' <span class="pill t-off">' + esc(d.holiday) + '</span>' : '') + '</td>' +
         '<td class="r">' + (d.lateMin || dash) + '</td><td class="r">' + (d.earlyMin || dash) + '</td>' +
-        '<td class="r">' + (d.extraMin || dash) + '</td></tr>').join('')
+        '<td class="r">' + (d.extraMin || dash) +
+          (d.extraNote && d.extraRawMin > d.extraMin ? '<small class="sub">' + esc(d.extraNote) + ', ' + (d.extraRawMin - d.extraMin) + ' min not counted</small>' : '') + '</td></tr>').join('')
         : '<tr><td colspan="8" class="empty">No records match these filters.</td></tr>') + '</tbody>';
   }
   $('dailyTable').addEventListener('click', (e) => { const b = e.target.closest('[data-emp]'); if (b) openDetail(b.dataset.emp); });
@@ -644,7 +879,10 @@
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(state.data.daily.map((d) => ({
       'ID': d.id, 'Name': d.name, 'Date': d.date, 'Day': d.day, 'In': d.inTime, 'Out': d.outTime, 'All Punches': d.punches,
       'Status': d.status, 'Holiday': d.holiday, 'Late (Min)': d.lateMin, 'Before End (Min)': d.earlyMin, 'Overtime (Min)': d.extraMin,
+      'Event (Extra Not Counted)': d.extraNote,
     }))), 'Daily Attendance');
+    const ev = Object.keys(prefs.noExtra).sort().map((d) => ({ 'Date': d, 'Event': prefs.noExtra[d].name, 'Count Extra After': prefs.noExtra[d].after || 'Not counted' }));
+    if (ev.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ev), 'Event Days');
     const hol = Object.keys(prefs.holidays).sort().map((d) => ({ 'Date': d, 'Name': prefs.holidays[d] }));
     if (hol.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hol), 'Holidays');
     XLSX.writeFile(wb, 'Payroll ' + p.from + ' to ' + p.to + '.xlsx');
@@ -681,6 +919,28 @@
         '<button class="btn ghost icon sm" data-remove="' + d + '" title="Remove" aria-label="Remove holiday">' + icon('close') + '</button></div>').join('')
       : '<p class="note" style="margin:0">No holidays added yet.</p>';
 
+    // Party / event days: staying late is not counted as extra work
+    let ev = WD.map((w) => '<div class="wd">' + w.slice(0, 1) + w.slice(1).toLowerCase() + '</div>').join('');
+    for (let i = 0; i < lead; i++) ev += '<div class="day blank"></div>';
+    dates.forEach((date) => {
+      const e = prefs.noExtra[date];
+      const stayed = daily.filter((d) => d.date === date && d.extraRawMin > 0).length;
+      ev += '<button class="day' + (e ? ' evt' : '') + '" data-evt="' + date + '" title="' +
+        (e ? esc(e.name) + ' (click to remove)' : 'Click to mark as a party / event day' + (stayed ? ' · ' + stayed + ' stayed late' : '')) + '">' +
+        '<b>' + Number(date.slice(8)) + '</b><small>' + (e ? esc(e.name) : stayed ? '+' + stayed : '') + '</small></button>';
+    });
+    $('evtPicker').innerHTML = ev;
+    const evList = Object.keys(prefs.noExtra).filter((d) => dates.includes(d)).sort();
+    $('evtList').innerHTML = evList.length
+      ? evList.map((d) => {
+        const removed = daily.filter((x) => x.date === d).reduce((t, x) => t + x.extraRawMin - x.extraMin, 0);
+        return '<div class="hol-row evt-row"><span class="date">' + fmtDate(d) + '<small class="sub">' + (removed ? hours(removed) + ' h not counted' : 'Nothing removed') + '</small></span>' +
+          '<input class="input" data-evt-name="' + d + '" value="' + esc(prefs.noExtra[d].name) + '" aria-label="Event name for ' + fmtDate(d) + '">' +
+          '<label class="evt-after"><span>Count extra after</span><input class="input" type="time" data-evt-after="' + d + '" value="' + esc(prefs.noExtra[d].after || '') + '" aria-label="Count extra work after this time on ' + fmtDate(d) + '"></label>' +
+          '<button class="btn ghost icon sm" data-evt-remove="' + d + '" title="Remove" aria-label="Remove event day">' + icon('close') + '</button></div>';
+      }).join('')
+      : '<p class="note" style="margin:0">No event days in this period.</p>';
+
     const s = prefs.settings;
     $('r-basis').value = s.basis; $('r-half').value = s.half; $('r-fine').value = s.fine; $('r-free').value = s.free;
     $('r-ot').value = s.ot; $('r-otRate').value = s.otRate; $('r-paidLeaves').value = s.paidLeaves;
@@ -699,6 +959,28 @@
   $('holList').addEventListener('click', (e) => {
     const b = e.target.closest('[data-remove]');
     if (b) toggleHoliday(b.dataset.remove);
+  });
+
+  function toggleEvent(date) {
+    if (prefs.noExtra[date]) {
+      delete prefs.noExtra[date];
+      toast('Extra work on ' + fmtDate(date) + ' counts again');
+    } else {
+      prefs.noExtra[date] = { name: 'Party', after: '' };
+      toast('Extra work on ' + fmtDate(date) + ' will not be counted');
+    }
+    persist(); reparse();
+  }
+  $('evtPicker').addEventListener('click', (e) => { const b = e.target.closest('[data-evt]'); if (b) toggleEvent(b.dataset.evt); });
+  $('evtList').addEventListener('click', (e) => { const b = e.target.closest('[data-evt-remove]'); if (b) toggleEvent(b.dataset.evtRemove); });
+  $('evtList').addEventListener('change', (e) => {
+    const n = e.target.closest('[data-evt-name]');
+    const a = e.target.closest('[data-evt-after]');
+    if (n) prefs.noExtra[n.dataset.evtName].name = n.value.trim() || 'Party';
+    else if (a) prefs.noExtra[a.dataset.evtAfter].after = a.value;
+    else return;
+    persist(); reparse();
+    if (a) toast(a.value ? 'Only extra work after ' + a.value + ' counts' : 'No extra work counted that day');
   });
 
   const RULES = { 'r-basis': 'basis', 'r-half': 'half', 'r-fine': 'fine', 'r-free': 'free', 'r-ot': 'ot', 'r-otRate': 'otRate', 'r-paidLeaves': 'paidLeaves', 'r-ignoreOff': 'ignoreOff', 'r-sundayOff': 'sundayOff' };
@@ -725,30 +1007,10 @@
         return '<div class="c ' + (g ? g.cls : 'c-off') + '" title="' + esc(fmtDate(d.date) + ': ' + d.status + (d.inTime ? ' · in ' + d.inTime : '') + (d.outTime ? ' · out ' + d.outTime : '')) + '">' +
           '<b>' + Number(d.date.slice(8)) + '</b>' + (shortOf(d.status) || (d.holiday ? 'Off' : '')) + '</div>';
       }).join('');
-    const line = (label, value, cls) => '<div><span>' + label + '</span><b' + (cls ? ' style="color:var(' + cls + ')"' : '') + '>' + value + '</b></div>';
-
-    // Which days each issue happened on, e.g. "Late: Mon 3 Nov · 12 min"
-    const has = (d, flag) => d.status.split(', ').includes(flag);
-    const dayName = (d) => d.day.slice(0, 1) + d.day.slice(1, 3).toLowerCase() + ' ' + fmtDate(d.date, false);
-    const whichGroups = [
-      { label: 'Late', tone: 't-warn', pick: (d) => has(d, 'Late'), note: (d) => 'in ' + d.inTime + ' · ' + d.lateMin + ' min late' },
-      { label: 'Late exit', tone: 't-warn', pick: (d) => has(d, 'Left Early'), note: (d) => 'out ' + d.outTime + ' · ' + d.earlyMin + ' min early' },
-      { label: 'Half day', tone: 't-half', pick: (d) => has(d, 'Half Day'), note: (d) => [d.inTime && 'in ' + d.inTime, d.outTime && 'out ' + d.outTime].filter(Boolean).join(' · ') },
-      { label: 'Extra work', tone: 't-info', pick: (d) => d.extraMin > 0, note: (d) => 'out ' + d.outTime + ' · ' + (d.extraMin >= 60 ? hours(d.extraMin) + ' h' : d.extraMin + ' min') },
-      { label: 'Absent', tone: 't-bad', pick: (d) => d.status === 'Absent', note: () => '' },
-      { label: 'Missed punch', tone: 't-miss', pick: (d) => has(d, 'Missed Punch'), note: (d) => d.punches ? 'only ' + d.punches : '' },
-    ];
-    const which = whichGroups.map((g) => {
-      const list = days.filter(g.pick);
-      return '<div class="which"><div class="which-head"><span class="pill ' + g.tone + '">' + g.label + '</span><small>' + plural(list.length, 'day') + '</small></div>' +
-        (list.length
-          ? '<ul>' + list.map((d) => '<li><b>' + dayName(d) + '</b>' + (g.note(d) ? '<span>' + esc(g.note(d)) + '</span>' : '') + '</li>').join('') + '</ul>'
-          : '<p class="dim">None</p>') + '</div>';
-    }).join('');
-
     $('drawer').innerHTML =
       '<div class="drawer-head"><span class="avatar">' + esc(initials(s.name)) + '</span><div style="flex:1;min-width:0"><h2>' + esc(s.name) + '</h2>' +
       '<p>ID ' + esc(s.id) + (s.dept ? ' · ' + esc(s.dept) : '') + '</p></div>' +
+      '<button class="btn ghost sm" id="drawerDash">Charts</button>' +
       '<button class="btn ghost icon" id="closeDrawer" aria-label="Close">' + icon('close') + '</button></div>' +
       '<div class="drawer-body">' +
       '<div class="grid kpis">' +
@@ -761,35 +1023,72 @@
       '</div>' +
       '<div class="card"><div class="card-head"><div><h2>Salary</h2><p>For ' + fmtDate(state.data.period.from) + ' – ' + fmtDate(state.data.period.to) + '</p></div>' +
         '<label class="field"><span>Monthly salary (Rs)</span><input class="money-in" inputmode="numeric" id="drawerSalary" value="' + (p.salary || '') + '" placeholder="0"></label></div>' +
-        (p.hasSalary ? '<div class="breakdown">' +
-          line('Monthly salary', rs(p.salary)) +
-          line('Days off · ' + plural(p.offDays, 'day') + ', ' + p.paidLeave + ' paid', p.absentDed ? '−' + rs(p.absentDed) : rs(0), p.absentDed ? '--bad-text' : '') +
-          line('Half days · ' + p.halfDays, p.halfDed ? '−' + rs(p.halfDed) : rs(0), p.halfDed ? '--bad-text' : '') +
-          line('Late fines · ' + p.chargedLates + ' of ' + p.lateTimes + ' charged', p.lateFine ? '−' + rs(p.lateFine) : rs(0), p.lateFine ? '--bad-text' : '') +
-          line('Overtime · ' + hours(p.otMin) + ' h', p.otPay ? '+' + rs(p.otPay) : rs(0), p.otPay ? '--good-text' : '') +
-          '<div class="total"><span>Net pay</span><b>' + rs(p.net) + '</b></div></div>'
-          : '<p class="note" style="margin:0">Enter a monthly salary to see the deductions and net pay.</p>') +
+        breakdownHtml(p) +
       '</div>' +
       '<div class="card"><div class="card-head"><div><h2>This period</h2></div></div>' +
         '<div class="legend">' + legendHtml(GROUPS) + '</div><div class="strip">' + strip + '</div></div>' +
       '<div class="card"><div class="card-head"><div><h2>Which days</h2><p>When each late, half day and extra work happened</p></div></div>' +
-        '<div class="which-grid">' + which + '</div></div>' +
-      '<div class="card"><div class="card-head"><div><h2>Day by day</h2></div></div><div class="table-wrap" style="max-height:none"><table>' +
-        '<thead><tr><th>Date</th><th>In</th><th>Out</th><th>Status</th></tr></thead><tbody>' +
-        days.map((d) => '<tr><td>' + d.day.slice(0, 1) + d.day.slice(1, 3).toLowerCase() + ', ' + fmtDate(d.date, false) + '</td><td class="num">' + (d.inTime || '—') +
-          '</td><td class="num">' + (d.outTime || '—') + '</td><td>' + pill(d.status) + '</td></tr>').join('') +
-      '</tbody></table></div></div></div>';
+        whichHtml(days) + '</div>' +
+      '<div class="card"><div class="card-head"><div><h2>Day by day</h2></div></div>' + dayTableHtml(days) + '</div></div>';
 
     $('closeDrawer').addEventListener('click', closeDetail);
+    $('drawerDash').addEventListener('click', () => {
+      state.dashEmp = id; $('dashEmp').value = id;
+      closeDetail(); showTab('dashboard');
+    });
     $('drawerSalary').addEventListener('change', (e) => {
       setSalary(id, e.target.value);
-      renderPayroll(); renderKpis(); if (state.tab === 'dashboard') renderPayChart();
+      renderPayroll(); renderKpis(); if (state.tab === 'dashboard') renderCharts();
       openDetail(id);
     });
     const scrim = $('scrim');
     scrim.classList.remove('hidden');
     requestAnimationFrame(() => { scrim.classList.add('open'); $('drawer').classList.add('open'); });
     $('drawer').setAttribute('aria-hidden', 'false');
+  }
+
+  const line = (label, value, cls) => '<div><span>' + label + '</span><b' + (cls ? ' style="color:var(' + cls + ')"' : '') + '>' + value + '</b></div>';
+  function breakdownHtml(p) {
+    return p.hasSalary ? '<div class="breakdown">' +
+      line('Monthly salary', rs(p.salary)) +
+      line('Days off · ' + plural(p.offDays, 'day') + ', ' + p.paidLeave + ' paid', p.absentDed ? '−' + rs(p.absentDed) : rs(0), p.absentDed ? '--bad-text' : '') +
+      line('Half days · ' + p.halfDays, p.halfDed ? '−' + rs(p.halfDed) : rs(0), p.halfDed ? '--bad-text' : '') +
+      line('Late fines · ' + p.chargedLates + ' of ' + p.lateTimes + ' charged', p.lateFine ? '−' + rs(p.lateFine) : rs(0), p.lateFine ? '--bad-text' : '') +
+      line('Overtime · ' + hours(p.otMin) + ' h', p.otPay ? '+' + rs(p.otPay) : rs(0), p.otPay ? '--good-text' : '') +
+      '<div class="total"><span>Net pay</span><b>' + rs(p.net) + '</b></div></div>'
+      : '<p class="note" style="margin:0">Enter a monthly salary to see the deductions and net pay.</p>';
+  }
+
+  function dayTableHtml(days) {
+    return '<div class="table-wrap" style="max-height:none"><table>' +
+      '<thead><tr><th>Date</th><th>In</th><th>Out</th><th>Status</th><th class="r">Extra (min)</th></tr></thead><tbody>' +
+      days.map((d) => '<tr><td>' + d.day.slice(0, 1) + d.day.slice(1, 3).toLowerCase() + ', ' + fmtDate(d.date, false) + '</td><td class="num">' + (d.inTime || '—') +
+        '</td><td class="num">' + (d.outTime || '—') + '</td><td>' + pill(d.status) + (d.holiday ? ' <span class="pill t-off">' + esc(d.holiday) + '</span>' : '') + '</td>' +
+        '<td class="r">' + (d.extraMin || '—') + (d.extraNote && d.extraRawMin > d.extraMin ? '<small class="sub">' + esc(d.extraNote) + ', ' + (d.extraRawMin - d.extraMin) + ' not counted</small>' : '') + '</td></tr>').join('') +
+      '</tbody></table></div>';
+  }
+
+  // Which days each issue happened on, e.g. "Late: Mon 3 Nov · 12 min"
+  function whichHtml(days) {
+    const has = (d, flag) => d.status.split(', ').includes(flag);
+    const dayName = (d) => d.day.slice(0, 1) + d.day.slice(1, 3).toLowerCase() + ' ' + fmtDate(d.date, false);
+    const whichGroups = [
+      { label: 'Late', tone: 't-warn', pick: (d) => has(d, 'Late'), note: (d) => 'in ' + d.inTime + ' · ' + d.lateMin + ' min late' },
+      { label: 'Late exit', tone: 't-warn', pick: (d) => has(d, 'Left Early'), note: (d) => 'out ' + d.outTime + ' · ' + d.earlyMin + ' min early' },
+      { label: 'Half day', tone: 't-half', pick: (d) => has(d, 'Half Day'), note: (d) => [d.inTime && 'in ' + d.inTime, d.outTime && 'out ' + d.outTime].filter(Boolean).join(' · ') },
+      { label: 'Extra work', tone: 't-info', pick: (d) => d.extraMin > 0, note: (d) => 'out ' + d.outTime + ' · ' + (d.extraMin >= 60 ? hours(d.extraMin) + ' h' : d.extraMin + ' min') + (d.extraNote ? ' (after ' + d.extraNote + ')' : '') },
+      { label: 'Not counted (event)', tone: 't-off', pick: (d) => d.extraNote && d.extraRawMin > d.extraMin, note: (d) => d.extraNote + ' · out ' + d.outTime + ' · ' + (d.extraRawMin - d.extraMin) + ' min not counted' },
+      { label: 'Absent', tone: 't-bad', pick: (d) => d.status === 'Absent', note: () => '' },
+      { label: 'Missed punch', tone: 't-miss', pick: (d) => has(d, 'Missed Punch'), note: (d) => d.punches ? 'only ' + d.punches : '' },
+    ];
+    const which = whichGroups.map((g) => {
+      const list = days.filter(g.pick);
+      return '<div class="which"><div class="which-head"><span class="pill ' + g.tone + '">' + g.label + '</span><small>' + plural(list.length, 'day') + '</small></div>' +
+        (list.length
+          ? '<ul>' + list.map((d) => '<li><b>' + dayName(d) + '</b>' + (g.note(d) ? '<span>' + esc(g.note(d)) + '</span>' : '') + '</li>').join('') + '</ul>'
+          : '<p class="dim">None</p>') + '</div>';
+    }).join('');
+    return '<div class="which-grid">' + which + '</div>';
   }
   function closeDetail() {
     openId = null;
